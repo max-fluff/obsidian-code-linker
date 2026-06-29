@@ -12,8 +12,8 @@ and get something like:
 ```
 
 The plugin scans the folders you configure (using Node's filesystem API) and
-keeps the index in memory — there is **no external build step and no index
-file to commit**.
+keeps the index in memory — there is **no index file to commit and nothing to
+generate**; the index is rebuilt on startup and on demand.
 
 ## Features
 
@@ -36,7 +36,6 @@ file to commit**.
 | --- | --- |
 | **Code root** | Base folder the scan paths resolve against. Empty = the folder containing the vault. |
 | **Scan folders** | One path per line, relative to the code root. |
-| **Extensions** | File extensions to index, e.g. `.cs .ts`. |
 | **Skip folders** | Folder names never descended into (`obj`, `bin`, …). |
 | **Trigger** | Text that starts a suggestion (default `@@`). |
 | **Editor link preset** | VS Code / Rider / file:// / Custom. |
@@ -99,3 +98,26 @@ The index holds every entity (files plus each declaration kind). Under
 **Searchable entities** you can hide a kind — e.g. files, or `struct` — from the
 suggestions. This is a query-time filter: toggling it is instant and never
 triggers a re-scan.
+
+## Development
+
+The plugin is written as small CommonJS modules in `src/` and bundled into
+`main.js` by esbuild. `main.js` is generated — edit `src/` and rebuild rather
+than editing it directly.
+
+```sh
+npm install      # once, installs esbuild
+npm run build    # bundle src/ -> main.js
+```
+
+`src/` layout:
+
+- `main.js` — the plugin: settings, language compilation, folder scan, link building.
+- `suggest.js` — the `EditorSuggest` that drives autocomplete.
+- `settings-tab.js` — the settings UI.
+- `builtin-languages.js` — built-in language definitions and the languages-file template.
+- `constants.js` — defaults, URI presets, small string helpers.
+
+To deploy into a test vault on each build, create `esbuild.local.mjs` exporting
+`deployTargets` (a list of plugin folders to copy the build into).
+`node_modules/`, `package-lock.json` and `esbuild.local.mjs` are git-ignored.

@@ -1,0 +1,9 @@
+{
+  "id": "python",
+  "name": "Python",
+  "extensions": [".py"],
+  "patterns": [
+    { "re": "^\\s*class\\s+([A-Za-z_]\\w*)", "kind": "class", "nameGroup": 1 },
+    { "re": "^\\s*def\\s+([A-Za-z_]\\w*)", "kind": "def", "nameGroup": 1 }
+  ]
+}

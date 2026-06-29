@@ -1,0 +1,12 @@
+{
+  "id": "csharp",
+  "name": "C#",
+  "extensions": [".cs"],
+  "patterns": [
+    {
+      "re": "^\\s*(?:\\[[^\\]]*\\]\\s*)*(?:(?:public|internal|private|protected|static|sealed|abstract|partial|readonly|unsafe|new|ref)\\s+)*(class|struct|interface|enum|record)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "kindGroup": 1,
+      "nameGroup": 2
+    }
+  ]
+}

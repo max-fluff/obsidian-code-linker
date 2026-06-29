@@ -1,0 +1,17 @@
+{
+  "id": "typescript",
+  "name": "TypeScript",
+  "extensions": [".ts", ".tsx"],
+  "patterns": [
+    {
+      "re": "^\\s*(?:export\\s+)?(?:default\\s+)?(?:abstract\\s+)?(class|interface|enum|type)\\s+([A-Za-z_$][\\w$]*)",
+      "kindGroup": 1,
+      "nameGroup": 2
+    },
+    {
+      "re": "^\\s*(?:export\\s+)?(?:async\\s+)?function\\s+([A-Za-z_$][\\w$]*)",
+      "kind": "function",
+      "nameGroup": 1
+    }
+  ]
+}

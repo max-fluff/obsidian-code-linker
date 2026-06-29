@@ -1,0 +1,9 @@
+{
+  "id": "go",
+  "name": "Go",
+  "extensions": [".go"],
+  "patterns": [
+    { "re": "^\\s*type\\s+([A-Za-z_]\\w*)\\s+(?:struct|interface)", "kind": "type", "nameGroup": 1 },
+    { "re": "^\\s*func\\s+(?:\\([^)]*\\)\\s*)?([A-Za-z_]\\w*)", "kind": "func", "nameGroup": 1 }
+  ]
+}
