@@ -18,8 +18,10 @@ file to commit**.
 ## Features
 
 - `EditorSuggest` autocomplete on a configurable trigger.
-- Indexes file names plus C# type declarations (`class` / `struct` /
-  `interface` / `enum` / `record`) with their line numbers.
+- Indexes file names plus type declarations, with their line numbers.
+- Per-language config: each language is a set of file extensions + regexes.
+  Built-ins ship for C#, TypeScript, JavaScript, Python, C/C++ and Go; toggle
+  them on/off and add your own in the settings.
 - Configurable link target via a URI template with presets:
   - **VS Code** — `vscode://file/{abs}:{line}`
   - **Rider / JetBrains** — `jetbrains://rider/navigate/reference?project={project}&path={path}:{line}`
@@ -62,8 +64,29 @@ This plugin is desktop-only (it reads the filesystem).
 Copy `main.js`, `manifest.json`, and `styles.css` into
 `<vault>/.obsidian/plugins/code-linker/`, then enable the plugin.
 
-## Notes
+## Languages
 
-Type detection is tuned for C#; file indexing works for any language. To index
-other languages, add their extensions and (if you want type-level entries)
-extend the declaration regex in `main.js`.
+Only **enabled** languages are scanned: their extensions decide which files are
+read, and their patterns decide which declarations become entries (files always
+get a top-of-file entry). Enable/disable languages with the toggles in settings.
+
+To add or override a language, put a JSON array in **Custom languages (JSON)**
+and click **Apply**. An entry whose `id` matches a built-in replaces it.
+
+```json
+[
+  {
+    "id": "rust",
+    "name": "Rust",
+    "extensions": [".rs"],
+    "patterns": [
+      { "re": "^\\s*(?:pub\\s+)?(struct|enum|trait)\\s+([A-Za-z_]\\w*)", "kindGroup": 1, "nameGroup": 2 },
+      { "re": "^\\s*(?:pub\\s+)?fn\\s+([A-Za-z_]\\w*)", "kind": "fn", "nameGroup": 1 }
+    ]
+  }
+]
+```
+
+Each pattern uses either `kindGroup` + `nameGroup` (the kind is read from the
+match) or `kind` (a fixed label) + `nameGroup` (defaults to group 1). `flags`
+is optional. Remember to double-escape backslashes inside JSON.

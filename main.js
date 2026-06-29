@@ -6,6 +6,10 @@
 //
 // The plugin scans the configured folders itself (Node fs, desktop only) and
 // keeps the index in memory — no external build step or index file.
+//
+// What counts as a "type" is driven by a language config: each language has a
+// set of file extensions and one or more regexes. Built-ins ship below; extra
+// languages (or overrides) are added as JSON in the settings.
 
 const { Plugin, EditorSuggest, PluginSettingTab, Setting, Notice } = require("obsidian");
 const fs = require("fs");
@@ -18,20 +22,83 @@ const PRESETS = {
   file: "file:///{abs}",
 };
 
+// Each pattern's regex captures a declaration. Use either:
+//   kindGroup + nameGroup  — kind read from the match (e.g. class|struct|...)
+//   kind (literal) + nameGroup — fixed kind label, name from a group (default 1)
+const BUILTIN_LANGUAGES = [
+  {
+    id: "csharp",
+    name: "C#",
+    extensions: [".cs"],
+    patterns: [
+      {
+        re: String.raw`^\s*(?:\[[^\]]*\]\s*)*(?:(?:public|internal|private|protected|static|sealed|abstract|partial|readonly|unsafe|new|ref)\s+)*(class|struct|interface|enum|record)\s+([A-Za-z_][A-Za-z0-9_]*)`,
+        kindGroup: 1,
+        nameGroup: 2,
+      },
+    ],
+  },
+  {
+    id: "typescript",
+    name: "TypeScript",
+    extensions: [".ts", ".tsx"],
+    patterns: [
+      {
+        re: String.raw`^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?(class|interface|enum|type)\s+([A-Za-z_$][\w$]*)`,
+        kindGroup: 1,
+        nameGroup: 2,
+      },
+      { re: String.raw`^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)`, kind: "function", nameGroup: 1 },
+    ],
+  },
+  {
+    id: "javascript",
+    name: "JavaScript",
+    extensions: [".js", ".jsx", ".mjs", ".cjs"],
+    patterns: [
+      { re: String.raw`^\s*(?:export\s+)?(?:default\s+)?class\s+([A-Za-z_$][\w$]*)`, kind: "class", nameGroup: 1 },
+      { re: String.raw`^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)`, kind: "function", nameGroup: 1 },
+    ],
+  },
+  {
+    id: "python",
+    name: "Python",
+    extensions: [".py"],
+    patterns: [
+      { re: String.raw`^\s*class\s+([A-Za-z_]\w*)`, kind: "class", nameGroup: 1 },
+      { re: String.raw`^\s*def\s+([A-Za-z_]\w*)`, kind: "def", nameGroup: 1 },
+    ],
+  },
+  {
+    id: "cpp",
+    name: "C / C++",
+    extensions: [".h", ".hpp", ".hh", ".cpp", ".cc", ".cxx"],
+    patterns: [
+      { re: String.raw`^\s*(?:template\s*<[^>]*>\s*)?(class|struct|enum)\s+([A-Za-z_]\w*)`, kindGroup: 1, nameGroup: 2 },
+    ],
+  },
+  {
+    id: "go",
+    name: "Go",
+    extensions: [".go"],
+    patterns: [
+      { re: String.raw`^\s*type\s+([A-Za-z_]\w*)\s+(?:struct|interface)`, kind: "type", nameGroup: 1 },
+      { re: String.raw`^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)`, kind: "func", nameGroup: 1 },
+    ],
+  },
+];
+
 const DEFAULTS = {
   trigger: "@@",
   uriTemplate: PRESETS.vscode,
   codeRoot: "", // empty => parent folder of the vault
   scanRoots: "", // one path per line, relative to codeRoot
-  extensions: ".cs",
   skipDirs: "obj, bin, .git, Library, Temp, node_modules",
+  enabledLanguages: ["csharp"],
+  customLanguages: "", // JSON array of language defs; overrides/extends built-ins by id
   minChars: 1,
   maxResults: 12,
 };
-
-// public sealed partial class Foo / [Attr] internal struct Bar / enum E ...
-const TYPE_RE =
-  /^\s*(?:\[[^\]]*\]\s*)*(?:(?:public|internal|private|protected|static|sealed|abstract|partial|readonly|unsafe|new|ref)\s+)*(class|struct|interface|enum|record)\s+([A-Za-z_][A-Za-z0-9_]*)/;
 
 const splitLines = (s) =>
   (s || "")
@@ -121,6 +188,7 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       return t;
     };
 
+    // --- Code index ---------------------------------------------------------
     containerEl.createEl("h3", { text: "Code index" });
 
     new Setting(containerEl)
@@ -149,16 +217,6 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Extensions")
-      .setDesc("File extensions to index, e.g. .cs .ts")
-      .addText((t) =>
-        t.setValue(s.extensions).onChange(async (v) => {
-          s.extensions = v;
-          await save();
-        })
-      );
-
-    new Setting(containerEl)
       .setName("Skip folders")
       .setDesc("Folder names never descended into.")
       .addText((t) =>
@@ -174,6 +232,65 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       .setName("Rebuild index now")
       .addButton((b) => b.setButtonText("Rebuild").onClick(() => this.plugin.rebuildIndex(true)));
 
+    // --- Languages ----------------------------------------------------------
+    containerEl.createEl("h3", { text: "Languages" });
+    const enabled = new Set(s.enabledLanguages || []);
+    const enabledCount = this.plugin.languages.filter((l) => enabled.has(l.id)).length;
+    containerEl.createEl("div", {
+      cls: "setting-item-description",
+      text: `Which languages are scanned, and how declarations are detected. ${enabledCount} of ${this.plugin.languages.length} enabled.`,
+    });
+
+    for (const lang of this.plugin.languages) {
+      new Setting(containerEl)
+        .setName(lang.name)
+        .setDesc(`id: ${lang.id} · ${lang.extensions.join(" ") || "(no extensions)"}`)
+        .addToggle((t) =>
+          t.setValue(enabled.has(lang.id)).onChange(async (v) => {
+            const set = new Set(s.enabledLanguages || []);
+            if (v) set.add(lang.id);
+            else set.delete(lang.id);
+            s.enabledLanguages = [...set];
+            await save();
+            this.plugin.rebuildIndex(false);
+          })
+        );
+    }
+
+    for (const bad of this.plugin.languageErrors || []) {
+      const row = new Setting(containerEl).setName(bad.id).setDesc(`Invalid: ${bad.error}`);
+      row.settingEl.addClass("mod-warning");
+    }
+
+    new Setting(containerEl)
+      .setName("Custom languages (JSON)")
+      .setDesc(
+        'Array of {id, name, extensions, patterns}. Each pattern: {re, flags?, kindGroup?, nameGroup?, kind?}. ' +
+          "A pattern uses kindGroup+nameGroup (kind read from the match) or kind+nameGroup (fixed kind). " +
+          "An entry whose id matches a built-in overrides it. Click Apply after editing."
+      )
+      .addTextArea((t) => {
+        t.inputEl.rows = 8;
+        t.inputEl.style.width = "100%";
+        t.inputEl.style.fontFamily = "var(--font-monospace)";
+        t.setValue(s.customLanguages).onChange(async (v) => {
+          s.customLanguages = v;
+          await save();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Apply language config")
+      .setDesc("Recompile languages, refresh this list, and rebuild the index.")
+      .addButton((b) =>
+        b.setButtonText("Apply").onClick(async () => {
+          this.plugin.compileLanguages();
+          await this.plugin.rebuildIndex(true);
+          this.display();
+        })
+      );
+
+    // --- Suggestions & links ------------------------------------------------
     containerEl.createEl("h3", { text: "Suggestions & links" });
 
     new Setting(containerEl)
@@ -248,6 +365,9 @@ module.exports = class CodeLinkerPlugin extends Plugin {
   async onload() {
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());
     this.index = [];
+    this.languages = [];
+    this.languageErrors = [];
+    this.compileLanguages();
 
     this.registerEditorSuggest(new CodeIndexSuggest(this.app, this));
     this.addSettingTab(new CodeLinkerSettingTab(this.app, this));
@@ -269,6 +389,54 @@ module.exports = class CodeLinkerPlugin extends Plugin {
     return base ? nodePath.dirname(base) : "";
   }
 
+  // Merge built-ins with the user's JSON, compile every regex.
+  compileLanguages() {
+    const merged = new Map();
+    for (const l of BUILTIN_LANGUAGES) merged.set(l.id, l);
+    this.languageErrors = [];
+
+    const raw = (this.settings.customLanguages || "").trim();
+    if (raw) {
+      let arr = null;
+      try {
+        arr = JSON.parse(raw);
+      } catch (e) {
+        this.languageErrors.push({ id: "(custom JSON)", error: "invalid JSON: " + e.message });
+      }
+      if (Array.isArray(arr)) {
+        for (const def of arr) {
+          if (!def || typeof def.id !== "string") {
+            this.languageErrors.push({ id: (def && def.id) || "(unknown)", error: "missing string id" });
+            continue;
+          }
+          merged.set(def.id, def);
+        }
+      } else if (arr != null) {
+        this.languageErrors.push({ id: "(custom JSON)", error: "expected a JSON array" });
+      }
+    }
+
+    const out = [];
+    for (const def of merged.values()) {
+      const extensions = Array.isArray(def.extensions) ? def.extensions.map((e) => String(e).toLowerCase()) : [];
+      const patterns = [];
+      for (const p of def.patterns || []) {
+        try {
+          patterns.push({
+            regex: new RegExp(p.re, p.flags || ""),
+            kind: p.kind,
+            kindGroup: p.kindGroup,
+            nameGroup: p.nameGroup,
+          });
+        } catch (e) {
+          this.languageErrors.push({ id: def.id, error: `bad regex: ${e.message}` });
+        }
+      }
+      out.push({ id: def.id, name: def.name || def.id, extensions, patterns });
+    }
+    this.languages = out;
+  }
+
   async rebuildIndex(notify) {
     const root = this.codeRoot();
     if (!root) {
@@ -281,12 +449,28 @@ module.exports = class CodeLinkerPlugin extends Plugin {
       if (notify) new Notice("Code Linker: no scan folders configured (see settings)");
       return;
     }
-    const exts = splitList(this.settings.extensions).map((e) => (e.startsWith(".") ? e : "." + e));
+
+    // extension -> [enabled languages that claim it]
+    const enabled = new Set(this.settings.enabledLanguages || []);
+    const byExt = new Map();
+    for (const lang of this.languages) {
+      if (!enabled.has(lang.id)) continue;
+      for (const ext of lang.extensions) {
+        if (!byExt.has(ext)) byExt.set(ext, []);
+        byExt.get(ext).push(lang);
+      }
+    }
+    if (!byExt.size) {
+      this.index = [];
+      if (notify) new Notice("Code Linker: no languages enabled");
+      return;
+    }
+
     const skip = new Set(splitList(this.settings.skipDirs));
     const out = [];
     try {
       for (const r of roots) {
-        await this.walk(nodePath.join(root, r), root, exts, skip, out);
+        await this.walk(nodePath.join(root, r), root, byExt, skip, out);
       }
     } catch (err) {
       if (notify) new Notice(`Code Linker: scan failed — ${err && err.message}`);
@@ -297,7 +481,7 @@ module.exports = class CodeLinkerPlugin extends Plugin {
     if (notify) new Notice(`Code Linker: ${out.length} entries indexed`);
   }
 
-  async walk(absDir, root, exts, skip, out) {
+  async walk(absDir, root, byExt, skip, out) {
     let items;
     try {
       items = await fsp.readdir(absDir, { withFileTypes: true });
@@ -307,14 +491,15 @@ module.exports = class CodeLinkerPlugin extends Plugin {
     for (const it of items) {
       const abs = nodePath.join(absDir, it.name);
       if (it.isDirectory()) {
-        if (!skip.has(it.name)) await this.walk(abs, root, exts, skip, out);
-      } else if (it.isFile() && exts.some((e) => it.name.endsWith(e))) {
-        await this.indexFile(abs, root, out);
+        if (!skip.has(it.name)) await this.walk(abs, root, byExt, skip, out);
+      } else if (it.isFile()) {
+        const langs = byExt.get(nodePath.extname(it.name).toLowerCase());
+        if (langs) await this.indexFile(abs, root, langs, out);
       }
     }
   }
 
-  async indexFile(abs, root, out) {
+  async indexFile(abs, root, langs, out) {
     let text;
     try {
       text = await fsp.readFile(abs, "utf8");
@@ -324,10 +509,26 @@ module.exports = class CodeLinkerPlugin extends Plugin {
     const rel = nodePath.relative(root, abs).split(nodePath.sep).join("/");
     const base = nodePath.basename(abs).replace(/\.[^.]+$/, "");
     out.push({ name: base, kind: "file", path: rel, line: 1 });
+
     const lines = text.split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
-      const m = TYPE_RE.exec(lines[i]);
-      if (m) out.push({ name: m[2], kind: m[1], path: rel, line: i + 1 });
+      const line = lines[i];
+      for (const lang of langs) {
+        for (const p of lang.patterns) {
+          p.regex.lastIndex = 0;
+          const m = p.regex.exec(line);
+          if (!m) continue;
+          let name, kind;
+          if (p.kindGroup != null) {
+            kind = m[p.kindGroup];
+            name = m[p.nameGroup != null ? p.nameGroup : 2];
+          } else {
+            kind = p.kind || "type";
+            name = m[p.nameGroup != null ? p.nameGroup : 1];
+          }
+          if (name) out.push({ name, kind, path: rel, line: i + 1 });
+        }
+      }
     }
   }
 
