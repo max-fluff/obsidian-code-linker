@@ -9,7 +9,7 @@
 //
 // What counts as a "type" is driven by a language config: each language has a
 // set of file extensions and one or more regexes. Built-ins ship below; extra
-// languages (or overrides) are added as JSON in the settings.
+// languages (or overrides) live in a JSON file in the vault.
 
 const { Plugin, EditorSuggest, PluginSettingTab, Setting, Notice } = require("obsidian");
 const fs = require("fs");
@@ -88,6 +88,19 @@ const BUILTIN_LANGUAGES = [
   },
 ];
 
+const LANGUAGES_TEMPLATE = `[
+  {
+    "id": "rust",
+    "name": "Rust",
+    "extensions": [".rs"],
+    "patterns": [
+      { "re": "^\\\\s*(?:pub\\\\s+)?(struct|enum|trait)\\\\s+([A-Za-z_]\\\\w*)", "kindGroup": 1, "nameGroup": 2 },
+      { "re": "^\\\\s*(?:pub\\\\s+)?fn\\\\s+([A-Za-z_]\\\\w*)", "kind": "fn", "nameGroup": 1 }
+    ]
+  }
+]
+`;
+
 const DEFAULTS = {
   trigger: "@@",
   uriTemplate: PRESETS.vscode,
@@ -95,7 +108,8 @@ const DEFAULTS = {
   scanRoots: "", // one path per line, relative to codeRoot
   skipDirs: "obj, bin, .git, Library, Temp, node_modules",
   enabledLanguages: ["csharp"],
-  customLanguages: "", // JSON array of language defs; overrides/extends built-ins by id
+  languagesFile: "code-languages.json", // vault-relative JSON of extra/override languages
+  disabledKinds: [], // entity kinds hidden from suggestions (query-time filter)
   minChars: 1,
   maxResults: 12,
 };
@@ -135,9 +149,11 @@ class CodeIndexSuggest extends EditorSuggest {
     if (!idx || !idx.length) return [];
     const q = ctx.query.toLowerCase();
     const max = this.plugin.settings.maxResults;
+    const hidden = new Set(this.plugin.settings.disabledKinds || []);
     const starts = [];
     const contains = [];
     for (const e of idx) {
+      if (hidden.has(e.kind)) continue;
       const n = e.name.toLowerCase();
       if (n.startsWith(q)) {
         starts.push(e);
@@ -230,7 +246,7 @@ class CodeLinkerSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Rebuild index now")
-      .addButton((b) => b.setButtonText("Rebuild").onClick(() => this.plugin.rebuildIndex(true)));
+      .addButton((b) => b.setButtonText("Rebuild").onClick(() => this.plugin.rebuildIndex(true).then(() => this.display())));
 
     // --- Languages ----------------------------------------------------------
     containerEl.createEl("h3", { text: "Languages" });
@@ -252,7 +268,8 @@ class CodeLinkerSettingTab extends PluginSettingTab {
             else set.delete(lang.id);
             s.enabledLanguages = [...set];
             await save();
-            this.plugin.rebuildIndex(false);
+            await this.plugin.rebuildIndex(false);
+            this.display(); // refresh the searchable-kinds list for the new language
           })
         );
     }
@@ -263,32 +280,62 @@ class CodeLinkerSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
-      .setName("Custom languages (JSON)")
-      .setDesc(
-        'Array of {id, name, extensions, patterns}. Each pattern: {re, flags?, kindGroup?, nameGroup?, kind?}. ' +
-          "A pattern uses kindGroup+nameGroup (kind read from the match) or kind+nameGroup (fixed kind). " +
-          "An entry whose id matches a built-in overrides it. Click Apply after editing."
-      )
-      .addTextArea((t) => {
-        t.inputEl.rows = 8;
-        t.inputEl.style.width = "100%";
-        t.inputEl.style.fontFamily = "var(--font-monospace)";
-        t.setValue(s.customLanguages).onChange(async (v) => {
-          s.customLanguages = v;
-          await save();
-        });
-      });
+      .setName("Languages file")
+      .setDesc("Vault-relative JSON file with extra/override languages. An entry whose id matches a built-in replaces it.")
+      .addText((t) =>
+        wide(t)
+          .setValue(s.languagesFile)
+          .onChange(async (v) => {
+            s.languagesFile = v.trim();
+            await save();
+          })
+      );
 
     new Setting(containerEl)
-      .setName("Apply language config")
-      .setDesc("Recompile languages, refresh this list, and rebuild the index.")
+      .setName("Template / reload")
+      .setDesc("Create a starter template at that path, or reload it after editing.")
+      .addButton((b) => b.setButtonText("Create template").onClick(() => this.plugin.createLanguagesTemplate().then(() => this.display())))
       .addButton((b) =>
-        b.setButtonText("Apply").onClick(async () => {
-          this.plugin.compileLanguages();
-          await this.plugin.rebuildIndex(true);
-          this.display();
-        })
+        b
+          .setButtonText("Reload & rebuild")
+          .setCta()
+          .onClick(async () => {
+            await this.plugin.loadLanguagesFile();
+            await this.plugin.rebuildIndex(true);
+            this.display();
+          })
       );
+
+    // --- Searchable entities (query-time filter, no rescan) -----------------
+    containerEl.createEl("h3", { text: "Searchable entities" });
+    const kinds = [...new Set(this.plugin.index.map((e) => e.kind))].sort();
+    if (!kinds.length) {
+      containerEl.createEl("div", {
+        cls: "setting-item-description",
+        text: "Rebuild the index to see the entity kinds it contains.",
+      });
+    } else {
+      containerEl.createEl("div", {
+        cls: "setting-item-description",
+        text: "Turn a kind off to hide it from suggestions (e.g. files, or structs). Applied instantly — no rescan.",
+      });
+      const hidden = new Set(s.disabledKinds || []);
+      for (const kind of kinds) {
+        const count = this.plugin.index.reduce((a, e) => a + (e.kind === kind ? 1 : 0), 0);
+        new Setting(containerEl)
+          .setName(kind)
+          .setDesc(`${count} in index`)
+          .addToggle((t) =>
+            t.setValue(!hidden.has(kind)).onChange(async (v) => {
+              const set = new Set(s.disabledKinds || []);
+              if (v) set.delete(kind);
+              else set.add(kind);
+              s.disabledKinds = [...set];
+              await save();
+            })
+          );
+      }
+    }
 
     // --- Suggestions & links ------------------------------------------------
     containerEl.createEl("h3", { text: "Suggestions & links" });
@@ -367,7 +414,8 @@ module.exports = class CodeLinkerPlugin extends Plugin {
     this.index = [];
     this.languages = [];
     this.languageErrors = [];
-    this.compileLanguages();
+    this.customRaw = "";
+    await this.loadLanguagesFile();
 
     this.registerEditorSuggest(new CodeIndexSuggest(this.app, this));
     this.addSettingTab(new CodeLinkerSettingTab(this.app, this));
@@ -376,6 +424,16 @@ module.exports = class CodeLinkerPlugin extends Plugin {
       name: "Rebuild code index",
       callback: () => this.rebuildIndex(true),
     });
+
+    // Recompile + rebuild when the languages file is edited.
+    this.registerEvent(
+      this.app.vault.on("modify", async (f) => {
+        if (f && f.path === this.settings.languagesFile) {
+          await this.loadLanguagesFile();
+          this.rebuildIndex(false);
+        }
+      })
+    );
 
     // Build in the background once the workspace is ready, so startup is not blocked.
     this.app.workspace.onLayoutReady(() => this.rebuildIndex(false));
@@ -389,19 +447,49 @@ module.exports = class CodeLinkerPlugin extends Plugin {
     return base ? nodePath.dirname(base) : "";
   }
 
-  // Merge built-ins with the user's JSON, compile every regex.
+  async loadLanguagesFile() {
+    const path = (this.settings.languagesFile || "").trim();
+    this.customRaw = "";
+    if (path) {
+      try {
+        if (await this.app.vault.adapter.exists(path)) {
+          this.customRaw = await this.app.vault.adapter.read(path);
+        }
+      } catch {
+        /* leave customRaw empty */
+      }
+    }
+    this.compileLanguages();
+  }
+
+  async createLanguagesTemplate() {
+    const path = (this.settings.languagesFile || "").trim();
+    if (!path) {
+      new Notice("Code Linker: set a languages file path first");
+      return;
+    }
+    if (await this.app.vault.adapter.exists(path)) {
+      new Notice(`Code Linker: ${path} already exists`);
+      return;
+    }
+    await this.app.vault.adapter.write(path, LANGUAGES_TEMPLATE);
+    new Notice(`Code Linker: template created at ${path}`);
+    await this.loadLanguagesFile();
+  }
+
+  // Merge built-ins with the languages file, compile every regex.
   compileLanguages() {
     const merged = new Map();
     for (const l of BUILTIN_LANGUAGES) merged.set(l.id, l);
     this.languageErrors = [];
 
-    const raw = (this.settings.customLanguages || "").trim();
+    const raw = (this.customRaw || "").trim();
     if (raw) {
       let arr = null;
       try {
         arr = JSON.parse(raw);
       } catch (e) {
-        this.languageErrors.push({ id: "(custom JSON)", error: "invalid JSON: " + e.message });
+        this.languageErrors.push({ id: "(languages file)", error: "invalid JSON: " + e.message });
       }
       if (Array.isArray(arr)) {
         for (const def of arr) {
@@ -412,7 +500,7 @@ module.exports = class CodeLinkerPlugin extends Plugin {
           merged.set(def.id, def);
         }
       } else if (arr != null) {
-        this.languageErrors.push({ id: "(custom JSON)", error: "expected a JSON array" });
+        this.languageErrors.push({ id: "(languages file)", error: "expected a JSON array" });
       }
     }
 

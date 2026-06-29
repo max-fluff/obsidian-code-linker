@@ -70,8 +70,10 @@ Only **enabled** languages are scanned: their extensions decide which files are
 read, and their patterns decide which declarations become entries (files always
 get a top-of-file entry). Enable/disable languages with the toggles in settings.
 
-To add or override a language, put a JSON array in **Custom languages (JSON)**
-and click **Apply**. An entry whose `id` matches a built-in replaces it.
+To add or override a language, point **Languages file** at a vault-relative JSON
+file, click **Create template** for a starter, edit it, then **Reload &
+rebuild** (it also reloads automatically when you save the file). An entry whose
+`id` matches a built-in replaces it.
 
 ```json
 [
@@ -90,3 +92,10 @@ and click **Apply**. An entry whose `id` matches a built-in replaces it.
 Each pattern uses either `kindGroup` + `nameGroup` (the kind is read from the
 match) or `kind` (a fixed label) + `nameGroup` (defaults to group 1). `flags`
 is optional. Remember to double-escape backslashes inside JSON.
+
+## Searchable entities
+
+The index holds every entity (files plus each declaration kind). Under
+**Searchable entities** you can hide a kind — e.g. files, or `struct` — from the
+suggestions. This is a query-time filter: toggling it is instant and never
+triggers a re-scan.
