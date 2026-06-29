@@ -1,0 +1,17 @@
+.code-linker-suggestion {
+  display: flex;
+  gap: 0.5em;
+  align-items: baseline;
+}
+.code-linker-name {
+  font-weight: 600;
+}
+.code-linker-kind {
+  font-size: 0.8em;
+  opacity: 0.65;
+}
+.code-linker-path {
+  margin-left: auto;
+  font-size: 0.75em;
+  opacity: 0.5;
+}
