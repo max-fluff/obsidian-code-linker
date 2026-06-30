@@ -59,7 +59,7 @@ var require_constants = __commonJS({
       contextMenu: true
       // the "Convert"/"Find and open" items in the editor right-click menu
     };
-    var splitLines2 = (s) => (s || "").split(/[\n,]+/).map((x) => x.trim()).filter(Boolean);
+    var splitLines2 = (s) => (s || "").split("\n").map((x) => x.trim()).filter(Boolean);
     function isProtected(text, pos) {
       if (/^---\r?\n/.test(text)) {
         const end = text.indexOf("\n---", 3);
@@ -998,7 +998,7 @@ var CodeLinkerPlugin = class extends Plugin {
     if (this.settings.enabledLanguages == null) {
       this.settings.enabledLanguages = this.languages.map((l) => l.id);
     }
-    this.settings.skipDirs = splitLines(this.settings.skipDirs).join("\n");
+    this.settings.skipDirs = (this.settings.skipDirs || "").split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).join("\n");
     if (this.settings.uriTemplate === "file:///{abs}")
       this.settings.uriTemplate = PRESETS.file;
     const tpl = this.settings.uriTemplate;

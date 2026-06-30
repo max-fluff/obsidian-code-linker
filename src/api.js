@@ -70,7 +70,7 @@ module.exports = {
 
   notifyIndexChange() {
     for (const cb of this._indexListeners || []) {
-      try { cb(); } catch (e) { /* a subscriber throwing must not break the rebuild */ }
+      try { cb(); } catch (e) { /* subscriber threw */ }
     }
   },
 };

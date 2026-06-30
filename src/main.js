@@ -106,7 +106,7 @@ class CodeLinkerPlugin extends Plugin {
       this.settings.enabledLanguages = this.languages.map((l) => l.id);
     }
     // Old skip lists were comma-separated; normalize to one-per-line (matches scan folders).
-    this.settings.skipDirs = splitLines(this.settings.skipDirs).join('\n');
+    this.settings.skipDirs = (this.settings.skipDirs || '').split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).join('\n');
     // The file preset used to inline an absolute path; switch old saves to the portable form.
     if (this.settings.uriTemplate === 'file:///{abs}') this.settings.uriTemplate = PRESETS.file;
     // The "Custom" preset is gone; preserve a custom template as a named editor so it stays selectable.

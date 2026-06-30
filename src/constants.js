@@ -43,7 +43,7 @@ const DEFAULT_SETTINGS = {
   contextMenu: true, // the "Convert"/"Find and open" items in the editor right-click menu
 };
 
-const splitLines = (s) => (s || '').split(/[\n,]+/).map((x) => x.trim()).filter(Boolean);
+const splitLines = (s) => (s || '').split('\n').map((x) => x.trim()).filter(Boolean);
 
 // Whether a suggestion must not fire at `pos`: inside frontmatter, fenced/inline
 // code, or an existing link. Tables and headings are allowed on purpose. Tests the
@@ -80,8 +80,7 @@ function inMatch(line, col, re) {
   return false;
 }
 
-// Whether pos sits in a real GFM table cell. A lone pipe in prose doesn't count —
-// the block of non-blank lines around pos must hold a delimiter row like "| --- |".
+// Real GFM table only — the surrounding block must hold a delimiter row like "| --- |".
 function inTableCell(text, pos) {
   const lines = text.split('\n');
   const lineIdx = (text.slice(0, pos).match(/\n/g) || []).length;
