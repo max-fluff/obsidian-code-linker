@@ -1,231 +1,228 @@
-"use strict";
+'use strict';
 
-const { PluginSettingTab, Setting } = require("obsidian");
-const { PRESETS } = require("./constants");
+const { PluginSettingTab, Setting } = require('obsidian');
+const { PRESETS, JETBRAINS_PRODUCTS } = require('./constants');
+const { t, plural } = require('./i18n');
 
 class CodeLinkerSettingTab extends PluginSettingTab {
-  constructor(app, plugin) {
-    super(app, plugin);
-    this.plugin = plugin;
-  }
+  constructor(app, plugin) { super(app, plugin); this.plugin = plugin; this.expanded = new Set(); }
 
-  detectPreset() {
+  // The preset dropdown key matching the active template: a built-in preset, or
+  // 'u:<i>' for one of the user's editors. Migration guarantees a match.
+  selectedEditor() {
     const tpl = this.plugin.settings.uriTemplate;
     for (const k of Object.keys(PRESETS)) if (PRESETS[k] === tpl) return k;
-    return "custom";
+    const i = (this.plugin.settings.editors || []).findIndex((e) => e.template === tpl);
+    return i >= 0 ? 'u:' + i : 'file';
+  }
+
+  // The kinds a language contributes to the index, each with a searchable toggle.
+  renderSearchableKinds(lang) {
+    const { containerEl } = this;
+    const s = this.plugin.settings;
+    const counts = new Map();
+    for (const e of this.plugin.index) {
+      if (e.lang === lang.id) counts.set(e.kind, (counts.get(e.kind) || 0) + 1);
+    }
+    if (!counts.size) {
+      containerEl.createEl('div', { cls: 'setting-item-description code-linker-kind-row', text: t('set.kind.rebuildHint') });
+      return;
+    }
+    const hidden = new Set(s.disabledKinds || []);
+    for (const kind of [...counts.keys()].sort()) {
+      const key = lang.id + ':' + kind;
+      const row = new Setting(containerEl)
+        .setName(kind)
+        .setDesc(t('set.kind.count', { n: counts.get(kind) }))
+        .addToggle((c) => c.setValue(!hidden.has(key)).onChange(async (v) => {
+          const set = new Set(s.disabledKinds || []);
+          if (v) set.delete(key); else set.add(key);
+          s.disabledKinds = [...set];
+          await this.plugin.saveSettings();
+        }));
+      row.settingEl.addClass('code-linker-kind-row');
+    }
   }
 
   display() {
     const { containerEl } = this;
     containerEl.empty();
     const s = this.plugin.settings;
-    const save = () => this.plugin.saveSettings();
-    const wide = (t) => {
-      t.inputEl.style.width = "100%";
-      return t;
-    };
+    // Scanned-content changes pass rebuild=true; query-time tweaks just persist.
+    const save = async (rebuild) => { await this.plugin.saveSettings(); if (rebuild) await this.plugin.rebuildIndex(false); };
+    const wide = (c) => { c.inputEl.addClass('code-linker-input'); return c; };
 
     // --- Code index ---------------------------------------------------------
-    containerEl.createEl("h3", { text: "Code index" });
+    new Setting(containerEl).setName(t('set.heading.index')).setHeading();
 
     new Setting(containerEl)
-      .setName("Code root")
-      .setDesc("Base folder the scan paths are relative to. Empty = the folder containing this vault.")
-      .addText((t) =>
-        wide(t)
-          .setPlaceholder(this.plugin.codeRoot())
-          .setValue(s.codeRoot)
-          .onChange(async (v) => {
-            s.codeRoot = v.trim();
-            await save();
-          })
-      );
+      .setName(t('set.codeRoot.name'))
+      .setDesc(t('set.codeRoot.desc'))
+      .addText((c) => wide(c).setPlaceholder(this.plugin.codeRoot()).setValue(s.codeRoot).onChange(async (v) => { s.codeRoot = v.trim(); await save(false); }));
 
-    new Setting(containerEl)
-      .setName("Scan folders")
-      .setDesc("One path per line, relative to the code root. These folders are scanned for source files.")
-      .addTextArea((t) => {
-        t.inputEl.rows = 4;
-        t.inputEl.style.width = "100%";
-        t.setValue(s.scanRoots).onChange(async (v) => {
-          s.scanRoots = v;
-          await save();
-        });
-      });
-
-    new Setting(containerEl)
-      .setName("Skip folders")
-      .setDesc("Folder names never descended into.")
-      .addText((t) =>
-        wide(t)
-          .setValue(s.skipDirs)
-          .onChange(async (v) => {
-            s.skipDirs = v;
-            await save();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Rebuild index now")
-      .addButton((b) => b.setButtonText("Rebuild").onClick(() => this.plugin.rebuildIndex(true).then(() => this.display())));
-
-    // --- Languages ----------------------------------------------------------
-    containerEl.createEl("h3", { text: "Languages" });
-    const enabled = new Set(s.enabledLanguages || []);
-    const enabledCount = this.plugin.languages.filter((l) => enabled.has(l.id)).length;
-    containerEl.createEl("div", {
-      cls: "setting-item-description",
-      text: `Which languages are scanned, and how declarations are detected. ${enabledCount} of ${this.plugin.languages.length} enabled.`,
+    const area = (setting, get, set) => setting.addTextArea((c) => {
+      c.inputEl.rows = 4;
+      c.inputEl.addClass('code-linker-input');
+      c.setValue(get()).onChange(async (v) => { set(v); await save(false); });
     });
 
+    area(new Setting(containerEl).setName(t('set.scanFolders.name')).setDesc(t('set.scanFolders.desc')), () => s.scanRoots, (v) => (s.scanRoots = v));
+    for (const st of this.plugin.scanRootStatus().filter((x) => !x.exists)) {
+      const row = new Setting(containerEl).setName(st.rel).setDesc(t('set.scanFolders.notFound'));
+      row.settingEl.addClass('mod-warning');
+    }
+    area(new Setting(containerEl).setName(t('set.skipFolders.name')).setDesc(t('set.skipFolders.desc')), () => s.skipDirs, (v) => (s.skipDirs = v));
+
+    new Setting(containerEl).setName(t('set.maxFileSize.name')).setDesc(t('set.maxFileSize.desc')).addText((c) => {
+      c.inputEl.type = 'number';
+      // Persist per keystroke, but rebuild once on blur — changing the limit
+      // invalidates the cache, so a rebuild per keypress would re-scan everything.
+      c.setValue(String(s.maxFileSizeKb)).onChange(async (v) => { const n = parseInt(v, 10); s.maxFileSizeKb = Number.isFinite(n) && n >= 0 ? n : 2048; await save(false); });
+      c.inputEl.addEventListener('blur', () => this.plugin.rebuildIndex(false));
+    });
+
+    new Setting(containerEl)
+      .setName(t('set.rebuild.name'))
+      .addButton((b) => b.setButtonText(t('set.rebuild.button')).onClick(() => this.plugin.rebuildIndex(true).then(() => this.display())));
+
+    // --- Languages ----------------------------------------------------------
+    new Setting(containerEl).setName(t('set.heading.languages')).setHeading();
+    const enabled = new Set(s.enabledLanguages || []);
+    const enabledCount = this.plugin.languages.filter((l) => enabled.has(l.id)).length;
+    containerEl.createEl('div', { cls: 'setting-item-description', text: t('set.languages.desc', { enabled: enabledCount, total: this.plugin.languages.length }) });
+
     for (const lang of this.plugin.languages) {
-      new Setting(containerEl)
-        .setName(lang.name)
-        .setDesc(`id: ${lang.id} · ${lang.extensions.join(" ") || "(no extensions)"}`)
-        .addToggle((t) =>
-          t.setValue(enabled.has(lang.id)).onChange(async (v) => {
-            const set = new Set(s.enabledLanguages || []);
-            if (v) set.add(lang.id);
-            else set.delete(lang.id);
-            s.enabledLanguages = [...set];
-            await save();
-            await this.plugin.rebuildIndex(false);
-            this.display(); // refresh the searchable-kinds list for the new language
-          })
-        );
+      const on = enabled.has(lang.id);
+      const open = this.expanded.has(lang.id);
+      const ext = lang.extensions.join(' ') || t('set.lang.noExtensions');
+      const setting = new Setting(containerEl).setName(lang.name).setDesc(t('set.lang.meta', { id: lang.id, ext }));
+
+      if (on) {
+        setting.addExtraButton((b) => b.setIcon(open ? 'chevron-up' : 'chevron-down')
+          .setTooltip(open ? t('set.lang.hideEntities') : t('set.lang.showEntities'))
+          .onClick(() => { if (open) this.expanded.delete(lang.id); else this.expanded.add(lang.id); this.display(); }));
+      } else {
+        this.expanded.delete(lang.id);
+      }
+
+      setting.addToggle((c) => c.setValue(on).onChange(async (v) => {
+        const set = new Set(s.enabledLanguages || []);
+        if (v) set.add(lang.id); else set.delete(lang.id);
+        s.enabledLanguages = [...set];
+        await save(true);
+        this.display(); // re-render so the language's chevron/kinds appear or disappear
+      }));
+
+      if (on && open) this.renderSearchableKinds(lang);
     }
 
     for (const bad of this.plugin.languageErrors || []) {
-      const row = new Setting(containerEl).setName(bad.id).setDesc(`Invalid: ${bad.error}`);
-      row.settingEl.addClass("mod-warning");
+      const row = new Setting(containerEl).setName(bad.id).setDesc(t('set.lang.invalid', { error: bad.error }));
+      row.settingEl.addClass('mod-warning');
     }
 
-    new Setting(containerEl)
-      .setName("Languages file")
-      .setDesc("Vault-relative JSON file with extra/override languages. An entry whose id matches a built-in replaces it.")
-      .addText((t) =>
-        wide(t)
-          .setValue(s.languagesFile)
-          .onChange(async (v) => {
-            s.languagesFile = v.trim();
-            await save();
-          })
-      );
+    // --- Custom languages ---------------------------------------------------
+    new Setting(containerEl).setName(t('set.heading.customLanguages')).setHeading();
+    containerEl.createEl('div', { cls: 'setting-item-description', text: t('set.customLanguages.desc') });
 
     new Setting(containerEl)
-      .setName("Template / reload")
-      .setDesc("Create a starter template at that path, or reload it after editing.")
-      .addButton((b) => b.setButtonText("Create template").onClick(() => this.plugin.createLanguagesTemplate().then(() => this.display())))
-      .addButton((b) =>
-        b
-          .setButtonText("Reload & rebuild")
-          .setCta()
-          .onClick(async () => {
-            await this.plugin.loadLanguagesFile();
-            await this.plugin.rebuildIndex(true);
-            this.display();
-          })
-      );
+      .setName(t('set.languagesFile.name'))
+      .setDesc(t('set.languagesFile.desc'))
+      .addText((c) => wide(c).setValue(s.languagesFile).onChange(async (v) => { s.languagesFile = v.trim(); await save(false); }));
 
-    // --- Searchable entities (query-time filter, no rescan) -----------------
-    containerEl.createEl("h3", { text: "Searchable entities" });
-    const kinds = [...new Set(this.plugin.index.map((e) => e.kind))].sort();
-    if (!kinds.length) {
-      containerEl.createEl("div", {
-        cls: "setting-item-description",
-        text: "Rebuild the index to see the entity kinds it contains.",
-      });
-    } else {
-      containerEl.createEl("div", {
-        cls: "setting-item-description",
-        text: "Turn a kind off to hide it from suggestions (e.g. files, or structs). Applied instantly — no rescan.",
-      });
-      const hidden = new Set(s.disabledKinds || []);
-      for (const kind of kinds) {
-        const count = this.plugin.index.reduce((a, e) => a + (e.kind === kind ? 1 : 0), 0);
-        new Setting(containerEl)
-          .setName(kind)
-          .setDesc(`${count} in index`)
-          .addToggle((t) =>
-            t.setValue(!hidden.has(kind)).onChange(async (v) => {
-              const set = new Set(s.disabledKinds || []);
-              if (v) set.delete(kind);
-              else set.add(kind);
-              s.disabledKinds = [...set];
-              await save();
-            })
-          );
-      }
-    }
+    new Setting(containerEl)
+      .setName(t('set.reloadLanguages.name'))
+      .setDesc(t('set.reloadLanguages.desc'))
+      .addButton((b) => b.setButtonText(t('set.reloadLanguages.button')).setCta().onClick(async () => { await this.plugin.loadLanguagesFile(); await this.plugin.rebuildIndex(true); this.display(); }));
 
     // --- Suggestions & links ------------------------------------------------
-    containerEl.createEl("h3", { text: "Suggestions & links" });
+    new Setting(containerEl).setName(t('set.heading.suggestions')).setHeading();
 
     new Setting(containerEl)
-      .setName("Trigger")
-      .setDesc("Type this to start a code suggestion.")
-      .addText((t) =>
-        t.setValue(s.trigger).onChange(async (v) => {
-          s.trigger = v || "@@";
-          await save();
-        })
-      );
-
-    const detected = this.detectPreset();
-    if (this.customMode === undefined) this.customMode = detected === "custom";
+      .setName(t('set.trigger.name'))
+      .setDesc(t('set.trigger.desc'))
+      .addText((c) => c.setValue(s.trigger).onChange(async (v) => { s.trigger = v || '@@'; await save(false); }));
 
     new Setting(containerEl)
-      .setName("Editor link preset")
-      .setDesc("Which editor the inserted links open in.")
-      .addDropdown((d) =>
-        d
-          .addOption("vscode", "VS Code")
-          .addOption("rider", "Rider / JetBrains")
-          .addOption("file", "file:// (open in default)")
-          .addOption("custom", "Custom")
-          .setValue(this.customMode ? "custom" : detected)
-          .onChange(async (v) => {
-            this.customMode = v === "custom";
-            if (!this.customMode && PRESETS[v]) s.uriTemplate = PRESETS[v];
-            await save();
-            this.display();
-          })
-      );
+      .setName(t('set.editorPreset.name'))
+      .setDesc(t('set.editorPreset.desc'))
+      .addDropdown((d) => {
+        d.addOption('file', t('set.preset.file'));
+        d.addOption('vscode', t('set.preset.vscode'));
+        d.addOption('jetbrains', t('set.preset.jetbrains'));
+        (s.editors || []).forEach((e, i) => d.addOption('u:' + i, e.name || `Editor ${i + 1}`));
+        d.setValue(this.selectedEditor()).onChange(async (v) => {
+          const wasJetbrains = this.selectedEditor() === 'jetbrains';
+          if (PRESETS[v]) s.uriTemplate = PRESETS[v];
+          else if (v.startsWith('u:')) s.uriTemplate = s.editors[+v.slice(2)].template;
+          await save(false);
+          // Re-render only when the JetBrains product picker needs to appear/disappear;
+          // other switches change nothing else on the pane, so the scroll stays put.
+          if (wasJetbrains !== (v === 'jetbrains')) this.display();
+        });
+      });
 
-    if (this.customMode) {
+    if (this.selectedEditor() === 'jetbrains') {
       new Setting(containerEl)
-        .setName("URI template")
-        .setDesc("Placeholders: {abs} {path} {line} {name} {project}")
-        .addText((t) =>
-          wide(t)
-            .setValue(s.uriTemplate)
-            .onChange(async (v) => {
-              s.uriTemplate = v;
-              await save();
-            })
-        );
+        .setName(t('set.jetbrainsProduct.name'))
+        .setDesc(t('set.jetbrainsProduct.desc'))
+        .addDropdown((d) => {
+          for (const [code, label] of JETBRAINS_PRODUCTS) d.addOption(code, label);
+          d.setValue(s.jetbrainsProduct).onChange(async (v) => { s.jetbrainsProduct = v; await save(false); });
+        });
     }
 
-    new Setting(containerEl).setName("Min characters").addText((t) => {
-      t.inputEl.type = "number";
-      t.setValue(String(s.minChars)).onChange(async (v) => {
-        const n = parseInt(v, 10);
-        s.minChars = Number.isFinite(n) ? n : 1;
-        await save();
+    // Your editors — foldable list of named URL templates that join the dropdown above.
+    if (this.showEditors === undefined) this.showEditors = false;
+    const editors = s.editors || [];
+    new Setting(containerEl)
+      .setName(t('set.editors.name'))
+      .setDesc(t('set.editors.count', { n: editors.length }))
+      .addExtraButton((b) => b.setIcon(this.showEditors ? 'chevron-up' : 'chevron-down')
+        .setTooltip(this.showEditors ? t('set.editors.collapse') : t('set.editors.expand'))
+        .onClick(() => { this.showEditors = !this.showEditors; this.display(); }));
+
+    if (this.showEditors) {
+      editors.forEach((ed, i) => {
+        const row = new Setting(containerEl)
+          .addText((c) => { c.inputEl.addClass('code-linker-editor-name'); c.setPlaceholder(t('set.editors.namePlaceholder')).setValue(ed.name).onChange(async (v) => { ed.name = v; await save(false); }); })
+          .addText((c) => { c.inputEl.addClass('code-linker-editor-tpl'); c.setPlaceholder('cursor://file/{abs}:{line}').setValue(ed.template).onChange(async (v) => { if (s.uriTemplate === ed.template) s.uriTemplate = v; ed.template = v; await save(false); }); })
+          .addExtraButton((b) => b.setIcon('trash').setTooltip(t('set.editors.remove')).onClick(async () => { if (s.uriTemplate === ed.template) s.uriTemplate = PRESETS.file; editors.splice(i, 1); await save(false); this.display(); }));
+        row.settingEl.addClass('code-linker-editor-row');
       });
+      // Help sits beside the Add button so it reads as one tidy row instead of floating text.
+      new Setting(containerEl)
+        .setDesc(t('set.editors.desc'))
+        .addButton((b) => b.setButtonText(t('set.editors.add')).setCta().onClick(async () => { editors.push({ name: '', template: '' }); s.editors = editors; await save(false); this.display(); }));
+    }
+
+    new Setting(containerEl).setName(t('set.minChars.name')).setDesc(t('set.minChars.desc')).addText((c) => {
+      c.inputEl.type = 'number';
+      c.setValue(String(s.minChars)).onChange(async (v) => { const n = parseInt(v, 10); s.minChars = Number.isFinite(n) ? n : 1; await save(false); });
     });
 
-    new Setting(containerEl).setName("Max results").addText((t) => {
-      t.inputEl.type = "number";
-      t.setValue(String(s.maxResults)).onChange(async (v) => {
-        const n = parseInt(v, 10);
-        s.maxResults = Number.isFinite(n) && n > 0 ? n : 12;
-        await save();
-      });
+    new Setting(containerEl).setName(t('set.maxResults.name')).setDesc(t('set.maxResults.desc')).addText((c) => {
+      c.inputEl.type = 'number';
+      c.setValue(String(s.maxResults)).onChange(async (v) => { const n = parseInt(v, 10); s.maxResults = Number.isFinite(n) && n > 0 ? n : 12; await save(false); });
     });
 
-    const info = containerEl.createEl("div", { cls: "setting-item-description" });
-    info.setText(`Code root: ${this.plugin.codeRoot() || "(unknown)"} · ${this.plugin.index.length} entries indexed`);
+    new Setting(containerEl)
+      .setName(t('set.autoRefresh.name'))
+      .setDesc(t('set.autoRefresh.desc'))
+      .addToggle((c) => c.setValue(s.autoRefresh).onChange(async (v) => { s.autoRefresh = v; await save(false); if (v) this.plugin.startWatchers(); else this.plugin.stopWatchers(); }));
+
+    if (s.autoRefresh && this.plugin.watchUnsupported) {
+      const warn = new Setting(containerEl).setDesc(t('set.autoRefresh.unsupported'));
+      warn.settingEl.addClass('mod-warning');
+    }
+
+    new Setting(containerEl)
+      .setName(t('set.contextMenu.name'))
+      .setDesc(t('set.contextMenu.desc'))
+      .addToggle((c) => c.setValue(s.contextMenu).onChange(async (v) => { s.contextMenu = v; await save(false); }));
+
+    const root = this.plugin.codeRoot() || t('set.info.unknownRoot');
+    containerEl.createEl('div', { cls: 'setting-item-description', text: t('set.info', { root, entries: plural('entry', this.plugin.index.length) }) });
   }
 }
 

@@ -1,6 +1,7 @@
-"use strict";
+'use strict';
 
-const { EditorSuggest } = require("obsidian");
+const { EditorSuggest, prepareFuzzySearch } = require('obsidian');
+const { protectedRanges, overlapsProtected, inTableCell } = require('./constants');
 
 class CodeIndexSuggest extends EditorSuggest {
   constructor(app, plugin) {
@@ -17,41 +18,52 @@ class CodeIndexSuggest extends EditorSuggest {
     // Stop once the typed text is no longer an identifier (space, etc.).
     if (!/^[\w.]*$/.test(query)) return null;
     if (query.length < Math.max(0, s.minChars)) return null;
+    // Don't suggest inside code, frontmatter or an existing link. Tables stay live.
+    const off = editor.posToOffset(cursor);
+    if (overlapsProtected(protectedRanges(editor.getValue()), off, off)) return null;
     return { start: { line: cursor.line, ch: i }, end: cursor, query };
   }
 
   getSuggestions(ctx) {
     const idx = this.plugin.index;
     if (!idx || !idx.length) return [];
-    const q = ctx.query.toLowerCase();
     const max = this.plugin.settings.maxResults;
     const hidden = new Set(this.plugin.settings.disabledKinds || []);
-    const starts = [];
-    const contains = [];
-    for (const e of idx) {
-      if (hidden.has(e.kind)) continue;
-      const n = e.name.toLowerCase();
-      if (n.startsWith(q)) {
-        starts.push(e);
-        if (starts.length >= max) break;
-      } else if (q && n.includes(q) && contains.length < max) {
-        contains.push(e);
+
+    if (!ctx.query) {
+      const out = [];
+      for (const e of idx) {
+        if (hidden.has(e.lang + ':' + e.kind)) continue;
+        out.push(e);
+        if (out.length >= max) break;
       }
+      return out;
     }
-    return starts.concat(contains).slice(0, max);
+
+    // Fuzzy/subsequence match ranks camelCase abbreviations (ssis -> ServerSendInputsSystem).
+    const match = prepareFuzzySearch(ctx.query);
+    const scored = [];
+    for (const e of idx) {
+      if (hidden.has(e.lang + ':' + e.kind)) continue;
+      const r = match(e.name);
+      if (r) scored.push({ e, score: r.score });
+    }
+    scored.sort((a, b) => b.score - a.score || a.e.name.localeCompare(b.e.name));
+    return scored.slice(0, max).map((s) => s.e);
   }
 
   renderSuggestion(e, el) {
-    el.addClass("code-linker-suggestion");
-    el.createSpan({ cls: "code-linker-name", text: e.name });
-    el.createSpan({ cls: "code-linker-kind", text: e.kind });
-    el.createSpan({ cls: "code-linker-path", text: e.path });
+    el.addClass('code-linker-suggestion');
+    el.createSpan({ cls: 'code-linker-name', text: e.name });
+    el.createSpan({ cls: 'code-linker-kind', text: e.kind });
+    el.createSpan({ cls: 'code-linker-path', text: e.path });
   }
 
   selectSuggestion(e) {
     const ctx = this.context;
     if (!ctx) return;
-    const link = this.plugin.buildLink(e);
+    const inTable = inTableCell(ctx.editor.getValue(), ctx.editor.posToOffset(ctx.start));
+    const link = this.plugin.buildLink(e, inTable);
     ctx.editor.replaceRange(link, ctx.start, ctx.end);
     const pos = ctx.editor.posToOffset(ctx.start) + link.length;
     ctx.editor.setCursor(ctx.editor.offsetToPos(pos));

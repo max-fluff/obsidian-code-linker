@@ -4,14 +4,50 @@
   align-items: baseline;
 }
 .code-linker-name {
-  font-weight: 600;
+  font-weight: var(--font-semibold);
 }
 .code-linker-kind {
-  font-size: 0.8em;
-  opacity: 0.65;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
 }
 .code-linker-path {
   margin-left: auto;
-  font-size: 0.75em;
-  opacity: 0.5;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.code-linker-input {
+  width: 100%;
+}
+
+/* User editor preset rows: name + template + remove on one line, wrapping to
+   two lines on a narrow pane so nothing collides. The full control area is used
+   (the empty name label is hidden) and the theme styles the row like any other. */
+.code-linker-editor-row .setting-item-info {
+  display: none;
+}
+.code-linker-editor-row .setting-item-control {
+  width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 8px;
+}
+.code-linker-editor-name {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.code-linker-editor-tpl {
+  flex: 3 1 240px;
+  min-width: 0;
+}
+
+/* Per-language searchable-entity rows, indented under their language toggle. */
+.code-linker-kind-row {
+  margin-left: 1.5em;
+  border-left: 2px solid var(--background-modifier-border);
+  padding-left: 0.75em;
+}
+.code-linker-kind-row .setting-item-name {
+  font-size: 0.9em;
+  opacity: 0.85;
 }
