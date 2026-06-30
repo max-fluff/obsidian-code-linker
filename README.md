@@ -36,6 +36,7 @@ The plugin ships as `main.js`, `manifest.json` and `styles.css`. The built-in la
 - [Development](#development)
 - [Installation](#installation)
 - [Compatibility](#compatibility)
+- [Related plugins](#related-plugins)
 
 ## What it does
 
@@ -221,3 +222,13 @@ Once it's accepted into the community catalog it will also be installable from *
 ## Compatibility
 
 Requires Obsidian 1.4.0 or newer. Desktop-only — the index is built by reading the filesystem through Node's API, which isn't available on mobile. Interface in English and Russian, following Obsidian's language.
+
+## Related plugins
+
+Also by the author — **[Glossary Linker](https://github.com/max-fluff/obsidian-glossary-linker)**: highlights glossary terms in any word form, turns them into real links, and learns new aliases from links you've already made. Works on desktop and mobile.
+
+<p align="center">
+  <a href="https://github.com/max-fluff/obsidian-glossary-linker">
+    <img src="docs/images/glossary-linker-banner.svg" alt="Glossary Linker — highlight terms in any word form, then link them" width="480">
+  </a>
+</p>
