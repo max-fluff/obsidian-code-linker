@@ -111,6 +111,8 @@ To add or override a language, set **Custom languages → Languages file** to a 
 
 Each pattern uses either `kindGroup` + `nameGroup` (the kind is read from the match) or `kind` (a fixed label) + `nameGroup` (defaults to group 1). `flags` is optional. Remember to double-escape backslashes inside JSON.
 
+The languages file is your own trusted config: its patterns are compiled and run as-is, with no safety validation. Anchor them (`^…`) and avoid nested quantifiers so a greedy regex can't bog down indexing. Lines longer than 2000 characters are skipped during parsing.
+
 ## Searchable entities
 
 Each enabled language lists the entity kinds it actually put in the index (e.g. `class`, `struct`, `file`) right under its toggle in settings. Turn a kind off to hide just that language's entities of that kind from suggestions — so you can keep C# `class` while hiding Go `func`. This is a query-time filter: toggling it is instant and never triggers a re-scan.

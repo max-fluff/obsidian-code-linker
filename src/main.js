@@ -16,6 +16,10 @@ const readline = require('readline');
 const nodePath = require('path');
 
 const { PRESETS, DEFAULT_SETTINGS, splitLines, inTableCell } = require('./constants');
+
+// A declaration line is never this wide; the cap bounds backtracking from a
+// greedy user regex on a minified file so indexing can't hang.
+const MAX_PARSE_LINE_LENGTH = 2000;
 const { BUILTIN_LANGUAGES } = require('./builtin-languages');
 const { CodeIndexSuggest } = require('./suggest');
 const { CodeLinkModal } = require('./modal');
@@ -480,6 +484,7 @@ class CodeLinkerPlugin extends Plugin {
       let i = 0;
       rl.on('line', (line) => {
         i++;
+        if (line.length > MAX_PARSE_LINE_LENGTH) return;
         for (const lang of langs) {
           for (const p of lang.patterns) {
             p.regex.lastIndex = 0;
@@ -512,12 +517,16 @@ class CodeLinkerPlugin extends Plugin {
     // First path segment is a reasonable default for IDE "project" placeholders.
     const project = (e.path.split('/')[0] || '').trim();
     const product = this.settings.jetbrainsProduct || 'idea';
+    // Encode names from disk so a #, ?, & or space can't rewrite the URL (e.g.
+    // JetBrains' ?project=&path= query). {abs} keeps encodeURI for the drive
+    // colon (C:); path segments use encodeURIComponent, which has no colon.
+    const encPath = (p) => p.split('/').map(encodeURIComponent).join('/');
     return this.settings.uriTemplate
       .replace(/{abs}/g, encodeURI(absFwd))
-      .replace(/{path}/g, e.path)
+      .replace(/{path}/g, encPath(e.path))
       .replace(/{line}/g, line)
-      .replace(/{name}/g, e.name)
-      .replace(/{project}/g, project)
+      .replace(/{name}/g, encodeURIComponent(e.name))
+      .replace(/{project}/g, encodeURIComponent(project))
       .replace(/{product}/g, product);
   }
 

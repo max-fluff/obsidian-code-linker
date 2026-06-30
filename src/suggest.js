@@ -1,7 +1,7 @@
 'use strict';
 
 const { EditorSuggest, prepareFuzzySearch } = require('obsidian');
-const { protectedRanges, overlapsProtected, inTableCell } = require('./constants');
+const { isProtected, inTableCell } = require('./constants');
 
 class CodeIndexSuggest extends EditorSuggest {
   constructor(app, plugin) {
@@ -20,7 +20,7 @@ class CodeIndexSuggest extends EditorSuggest {
     if (query.length < Math.max(0, s.minChars)) return null;
     // Don't suggest inside code, frontmatter or an existing link. Tables stay live.
     const off = editor.posToOffset(cursor);
-    if (overlapsProtected(protectedRanges(editor.getValue()), off, off)) return null;
+    if (isProtected(editor.getValue(), off)) return null;
     return { start: { line: cursor.line, ch: i }, end: cursor, query };
   }
 

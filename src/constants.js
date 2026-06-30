@@ -45,30 +45,40 @@ const DEFAULT_SETTINGS = {
 
 const splitLines = (s) => (s || '').split(/[\n,]+/).map((x) => x.trim()).filter(Boolean);
 
-// Character ranges in raw markdown where a suggestion must not fire: frontmatter,
-// fenced/inline code, and existing markdown links. Tables and headings are left
-// out on purpose — a code link is valid inside both.
-function protectedRanges(text) {
-  const ranges = [];
-  const push = (re) => { let m; while ((m = re.exec(text)) !== null) ranges.push([m.index, m.index + m[0].length]); };
+// Whether a suggestion must not fire at `pos`: inside frontmatter, fenced/inline
+// code, or an existing link. Tables and headings are allowed on purpose. Tests the
+// single position rather than scanning the whole document, so it's cheap per keystroke.
+function isProtected(text, pos) {
   if (/^---\r?\n/.test(text)) {
     const end = text.indexOf('\n---', 3);
-    if (end !== -1) ranges.push([0, end + 4]);
+    if (end !== -1 && pos <= end + 4) return true;
   }
-  push(/```[\s\S]*?```/g);
-  push(/~~~[\s\S]*?~~~/g);
-  push(/`[^`\n]+`/g);
-  push(/\[[^\]]*\]\([^)]*\)/g);
-  return ranges.sort((a, b) => a[0] - b[0]);
+  const lines = text.split('\n');
+  let lineStart = 0, lineIdx = 0;
+  for (; lineIdx < lines.length; lineIdx++) {
+    if (pos <= lineStart + lines[lineIdx].length) break;
+    lineStart += lines[lineIdx].length + 1;
+  }
+  // A fence count up to the cursor line tells us whether we're inside a block.
+  let fenced = false;
+  for (let i = 0; i < lineIdx; i++) {
+    const s = lines[i].trimStart();
+    if (s.startsWith('```') || s.startsWith('~~~')) fenced = !fenced;
+  }
+  if (fenced) return true;
+  // Inline code and links are line-local, so only the cursor's line matters.
+  const col = pos - lineStart;
+  const line = lines[lineIdx] || '';
+  return inMatch(line, col, /`[^`\n]+`/g) || inMatch(line, col, /\[[^\]]*\]\([^)]*\)/g);
 }
 
-const overlapsProtected = (ranges, s, e) => {
-  for (const [rs, re] of ranges) {
-    if (rs >= e) break;
-    if (re > s) return true;
+function inMatch(line, col, re) {
+  let m;
+  while ((m = re.exec(line)) !== null) {
+    if (col > m.index && col < m.index + m[0].length) return true;
   }
   return false;
-};
+}
 
 // Whether pos sits in a real GFM table cell. A lone pipe in prose doesn't count —
 // the block of non-blank lines around pos must hold a delimiter row like "| --- |".
@@ -84,4 +94,4 @@ function inTableCell(text, pos) {
   return false;
 }
 
-module.exports = { PRESETS, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, splitLines, protectedRanges, overlapsProtected, inTableCell };
+module.exports = { PRESETS, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, splitLines, isProtected, inTableCell };

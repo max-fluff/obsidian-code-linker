@@ -60,33 +60,39 @@ var require_constants = __commonJS({
       // the "Convert"/"Find and open" items in the editor right-click menu
     };
     var splitLines2 = (s) => (s || "").split(/[\n,]+/).map((x) => x.trim()).filter(Boolean);
-    function protectedRanges(text) {
-      const ranges = [];
-      const push = (re) => {
-        let m;
-        while ((m = re.exec(text)) !== null)
-          ranges.push([m.index, m.index + m[0].length]);
-      };
+    function isProtected(text, pos) {
       if (/^---\r?\n/.test(text)) {
         const end = text.indexOf("\n---", 3);
-        if (end !== -1)
-          ranges.push([0, end + 4]);
+        if (end !== -1 && pos <= end + 4)
+          return true;
       }
-      push(/```[\s\S]*?```/g);
-      push(/~~~[\s\S]*?~~~/g);
-      push(/`[^`\n]+`/g);
-      push(/\[[^\]]*\]\([^)]*\)/g);
-      return ranges.sort((a, b) => a[0] - b[0]);
-    }
-    var overlapsProtected = (ranges, s, e) => {
-      for (const [rs, re] of ranges) {
-        if (rs >= e)
+      const lines = text.split("\n");
+      let lineStart = 0, lineIdx = 0;
+      for (; lineIdx < lines.length; lineIdx++) {
+        if (pos <= lineStart + lines[lineIdx].length)
           break;
-        if (re > s)
+        lineStart += lines[lineIdx].length + 1;
+      }
+      let fenced = false;
+      for (let i = 0; i < lineIdx; i++) {
+        const s = lines[i].trimStart();
+        if (s.startsWith("```") || s.startsWith("~~~"))
+          fenced = !fenced;
+      }
+      if (fenced)
+        return true;
+      const col = pos - lineStart;
+      const line = lines[lineIdx] || "";
+      return inMatch(line, col, /`[^`\n]+`/g) || inMatch(line, col, /\[[^\]]*\]\([^)]*\)/g);
+    }
+    function inMatch(line, col, re) {
+      let m;
+      while ((m = re.exec(line)) !== null) {
+        if (col > m.index && col < m.index + m[0].length)
           return true;
       }
       return false;
-    };
+    }
     function inTableCell2(text, pos) {
       const lines = text.split("\n");
       const lineIdx = (text.slice(0, pos).match(/\n/g) || []).length;
@@ -103,7 +109,7 @@ var require_constants = __commonJS({
           return true;
       return false;
     }
-    module2.exports = { PRESETS: PRESETS2, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, splitLines: splitLines2, protectedRanges, overlapsProtected, inTableCell: inTableCell2 };
+    module2.exports = { PRESETS: PRESETS2, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, splitLines: splitLines2, isProtected, inTableCell: inTableCell2 };
   }
 });
 
@@ -240,7 +246,7 @@ var require_suggest = __commonJS({
   "src/suggest.js"(exports2, module2) {
     "use strict";
     var { EditorSuggest, prepareFuzzySearch } = require("obsidian");
-    var { protectedRanges, overlapsProtected, inTableCell: inTableCell2 } = require_constants();
+    var { isProtected, inTableCell: inTableCell2 } = require_constants();
     var CodeIndexSuggest2 = class extends EditorSuggest {
       constructor(app, plugin) {
         super(app);
@@ -258,7 +264,7 @@ var require_suggest = __commonJS({
         if (query.length < Math.max(0, s.minChars))
           return null;
         const off = editor.posToOffset(cursor);
-        if (overlapsProtected(protectedRanges(editor.getValue()), off, off))
+        if (isProtected(editor.getValue(), off))
           return null;
         return { start: { line: cursor.line, ch: i }, end: cursor, query };
       }
@@ -924,6 +930,7 @@ var fsp = fs.promises;
 var readline = require("readline");
 var nodePath = require("path");
 var { PRESETS, DEFAULT_SETTINGS, splitLines, inTableCell } = require_constants();
+var MAX_PARSE_LINE_LENGTH = 2e3;
 var { BUILTIN_LANGUAGES } = require_builtin_languages();
 var { CodeIndexSuggest } = require_suggest();
 var { CodeLinkModal } = require_modal();
@@ -1360,6 +1367,8 @@ var CodeLinkerPlugin = class extends Plugin {
       let i = 0;
       rl.on("line", (line) => {
         i++;
+        if (line.length > MAX_PARSE_LINE_LENGTH)
+          return;
         for (const lang of langs) {
           for (const p of lang.patterns) {
             p.regex.lastIndex = 0;
@@ -1392,7 +1401,8 @@ var CodeLinkerPlugin = class extends Plugin {
     const line = String(e.line || 1);
     const project = (e.path.split("/")[0] || "").trim();
     const product = this.settings.jetbrainsProduct || "idea";
-    return this.settings.uriTemplate.replace(/{abs}/g, encodeURI(absFwd)).replace(/{path}/g, e.path).replace(/{line}/g, line).replace(/{name}/g, e.name).replace(/{project}/g, project).replace(/{product}/g, product);
+    const encPath = (p) => p.split("/").map(encodeURIComponent).join("/");
+    return this.settings.uriTemplate.replace(/{abs}/g, encodeURI(absFwd)).replace(/{path}/g, encPath(e.path)).replace(/{line}/g, line).replace(/{name}/g, encodeURIComponent(e.name)).replace(/{project}/g, encodeURIComponent(project)).replace(/{product}/g, product);
   }
   // The markdown link to insert. Inside a table cell a literal pipe splits the row.
   buildLink(e, inTable) {
