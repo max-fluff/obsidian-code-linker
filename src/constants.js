@@ -33,6 +33,8 @@ const DEFAULT_SETTINGS = {
   scanRoots: '', // one path per line, relative to codeRoot
   skipDirs: 'obj\nbin\n.git\nLibrary\nTemp\nnode_modules', // one folder name per line
   editors: [], // user-defined editor presets, each { name, template }
+  askOnInsert: false, // ask which editor format to use on every insert (vs. the fixed preset)
+  showStatusBar: false, // show the active editor preset in the status bar, click to switch
   enabledLanguages: null, // null on first run => every built-in enabled
   languagesFile: 'code-languages.json', // vault-relative JSON of extra/override languages
   disabledKinds: [], // "<langId>:<kind>" keys hidden from suggestions (query-time filter)

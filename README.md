@@ -53,8 +53,11 @@ An `EditorSuggest` autocomplete on a configurable trigger, with fuzzy / camelCas
 A full-screen picker you can bind to hotkeys, in three flavors:
 
 - **Insert code link** — insert a markdown link at the cursor.
+- **Insert code link as…** — same, but pick the editor for this one link without changing the default.
 - **Open code file** — open the picked file in your editor, without inserting.
 - **Copy code link** — copy the markdown link to the clipboard.
+
+**Switch editor preset** lists your presets (and **Always ask**) so you can change the default without opening settings; picking JetBrains then asks which IDE. The same switcher is in the status bar when **Show editor in status bar** is on.
 
 <p align="center">
   <img src="docs/images/picker-1.png" alt="The command palette filtered to the Code Linker commands" width="560">
@@ -70,11 +73,11 @@ A full-screen picker you can bind to hotkeys, in three flavors:
 
 Selection-driven commands resolve the selected name or path (or the token under the cursor) against the index, then act; a single match runs directly, several open the picker. Both are also in the editor's right-click menu:
 
-- **Convert to code link** — replace the selection with a link.
+- **Find and convert to link** — replace the selection with a link.
 - **Find and open code** — open the matching file in your editor.
 
 <p align="center">
-  <img src="docs/images/context-menu-1.png" alt="The editor right-click menu showing Convert to code link and Find and open code" width="420">
+  <img src="docs/images/context-menu-1.png" alt="The editor right-click menu showing Find and convert to link and Find and open code" width="420">
 </p>
 
 <p align="center">
@@ -131,11 +134,12 @@ Each enabled language lists the entity kinds it actually put in the index (e.g. 
 | **Max file size (KB)** | Files larger than this are indexed by name only, not parsed for declarations (`0` = no limit, default 2048). |
 | **Skip folders** | One folder name per line, never descended into (`obj`, `bin`, …). |
 | **Trigger** | Text that starts a suggestion (default `@@`). |
-| **Editor link preset** | file:// / VS Code / JetBrains / one of your own editors. See [Link targets and URI templates](#link-targets-and-uri-templates). |
+| **Editor link preset** | file:// / VS Code / JetBrains / one of your own editors, or **Always ask** to pick the format on every insert. See [Link targets and URI templates](#link-targets-and-uri-templates). |
 | **JetBrains IDE** | Which JetBrains IDE the JetBrains preset opens (shown when it's selected). |
 | **Your editors** | Foldable list of named URL templates you add; each appears in the preset dropdown. |
+| **Show editor in status bar** | Show the active preset in the status bar; click it to switch editors without opening settings. |
 | **Auto-refresh index** | Watch the scan folders and rebuild when code changes. Recursive watching isn't supported on Linux — there, rebuild manually (the plugin says so when it can't watch). |
-| **Editor context menu** | Add the **Convert to code link** and **Find and open code** items to the editor's right-click menu. |
+| **Editor context menu** | Add the **Find and convert to link** and **Find and open code** items to the editor's right-click menu. |
 
 The index rebuilds in the background on startup and on demand (command **Code Linker: Rebuild code index**), and — when **Auto-refresh index** is on — automatically when source files change. It is cached to disk, so startup is instant; the background rebuild only re-reads files whose modification time changed.
 

@@ -6,13 +6,15 @@ module.exports = {
   // Commands
   'cmd.rebuildIndex': 'Перестроить индекс кода',
   'cmd.insertLink': 'Вставить ссылку на код',
+  'cmd.insertLinkAs': 'Вставить ссылку на код как…',
+  'cmd.switchPreset': 'Сменить пресет редактора',
   'cmd.openFile': 'Открыть файл кода',
   'cmd.copyLink': 'Скопировать ссылку на код',
   'cmd.convertSelection': 'Превратить выделение в ссылку на код',
   'cmd.openSelection': 'Найти и открыть код',
 
   // Editor context menu
-  'menu.convert': 'Превратить в ссылку на код',
+  'menu.convert': 'Найти и превратить в ссылку',
 
   // Notices
   'notice.noCodeRoot': 'Code Linker: не удалось определить корень кода',
@@ -22,15 +24,21 @@ module.exports = {
   'notice.indexed': 'Code Linker: проиндексировано {entries}',
   'notice.missingFolders': 'Code Linker: папка сканирования не найдена — {folders}',
   'notice.copied': 'Code Linker: ссылка скопирована',
+  'notice.editorSet': 'Code Linker: ссылки теперь открываются в {name}',
   'notice.noSelection': 'Code Linker: сначала выделите имя или путь',
   'notice.noMatch': 'Code Linker: нет записи кода для «{query}»',
   'notice.watchUnsupported': 'Code Linker: автообновление недоступно на этой платформе — перестраивайте вручную',
 
   // Status bar
   'status.indexing': 'Code Linker: индексирование… {n}',
+  'status.editor': 'Ссылка на код: {name}',
+  'status.editorTooltip': 'Code Linker: клик — сменить редактор, в котором открываются ссылки',
 
   // Command-palette modal
   'modal.searchPlaceholder': 'Поиск файлов и типов кода…',
+  'modal.switchPlaceholder': 'Выберите редактор, в котором открываются ссылки…',
+  'modal.formatPlaceholder': 'Выберите формат редактора для этой ссылки…',
+  'modal.productPlaceholder': 'Выберите IDE JetBrains…',
 
   // Settings — headings
   'set.heading.index': 'Индекс кода',
@@ -76,7 +84,8 @@ module.exports = {
   'set.editorPreset.desc': 'В каком редакторе открываются вставленные ссылки. Свои добавляются в «Ваши редакторы» ниже.',
   'set.preset.vscode': 'VS Code',
   'set.preset.jetbrains': 'JetBrains',
-  'set.preset.file': 'file:// (открыть в приложении по умолчанию)',
+  'set.preset.file': 'file://',
+  'set.preset.ask': 'Всегда спрашивать',
   'set.jetbrainsProduct.name': 'IDE JetBrains',
   'set.jetbrainsProduct.desc': 'В какой JetBrains IDE открываются ссылки.',
   'set.editors.name': 'Ваши редакторы',
@@ -87,6 +96,8 @@ module.exports = {
   'set.editors.namePlaceholder': 'Название',
   'set.editors.remove': 'Удалить',
   'set.editors.add': '+ Добавить редактор',
+  'set.statusBar.name': 'Показывать редактор в статус-баре',
+  'set.statusBar.desc': 'Показывать активный пресет редактора в статус-баре; клик по нему меняет редактор без входа в настройки.',
   'set.minChars.name': 'Минимум символов',
   'set.minChars.desc': 'Сколько символов ввести, прежде чем появятся подсказки.',
   'set.maxResults.name': 'Максимум результатов',
@@ -95,7 +106,7 @@ module.exports = {
   'set.autoRefresh.desc': 'Следить за папками сканирования и перестраивать индекс при изменении исходных файлов.',
   'set.autoRefresh.unsupported': 'Рекурсивное слежение за папками не поддерживается на этой платформе (Linux); перестраивайте вручную.',
   'set.contextMenu.name': 'Контекстное меню редактора',
-  'set.contextMenu.desc': 'Добавлять «Превратить в ссылку на код» и «Найти и открыть код» в меню по правому клику.',
+  'set.contextMenu.desc': 'Добавлять «Найти и превратить в ссылку» и «Найти и открыть код» в меню по правому клику.',
   'set.info': 'Корень кода: {root} · проиндексировано {entries}',
   'set.info.unknownRoot': '(неизвестно)',
 

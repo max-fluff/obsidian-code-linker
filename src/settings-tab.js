@@ -7,13 +7,12 @@ const { t, plural } = require('./i18n');
 class CodeLinkerSettingTab extends PluginSettingTab {
   constructor(app, plugin) { super(app, plugin); this.plugin = plugin; this.expanded = new Set(); }
 
-  // The preset dropdown key matching the active template: a built-in preset, or
-  // 'u:<i>' for one of the user's editors. Migration guarantees a match.
+  // The dropdown key for the active preset: 'ask' in always-ask mode, a built-in
+  // preset, or 'u:<i>' for a user editor. Migration guarantees a template match.
   selectedEditor() {
-    const tpl = this.plugin.settings.uriTemplate;
-    for (const k of Object.keys(PRESETS)) if (PRESETS[k] === tpl) return k;
-    const i = (this.plugin.settings.editors || []).findIndex((e) => e.template === tpl);
-    return i >= 0 ? 'u:' + i : 'file';
+    if (this.plugin.settings.askOnInsert) return 'ask';
+    const p = this.plugin.editorPresets().find((x) => x.template === this.plugin.settings.uriTemplate);
+    return p ? p.key : 'file';
   }
 
   // The kinds a language contributes to the index, each with a searchable toggle.
@@ -147,14 +146,15 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       .setName(t('set.editorPreset.name'))
       .setDesc(t('set.editorPreset.desc'))
       .addDropdown((d) => {
-        d.addOption('file', t('set.preset.file'));
-        d.addOption('vscode', t('set.preset.vscode'));
-        d.addOption('jetbrains', t('set.preset.jetbrains'));
-        (s.editors || []).forEach((e, i) => d.addOption('u:' + i, e.name || `Editor ${i + 1}`));
+        for (const p of this.plugin.editorPresets()) d.addOption(p.key, p.label);
+        d.addOption('ask', t('set.preset.ask'));
         d.setValue(this.selectedEditor()).onChange(async (v) => {
           const wasJetbrains = this.selectedEditor() === 'jetbrains';
-          if (PRESETS[v]) s.uriTemplate = PRESETS[v];
-          else if (v.startsWith('u:')) s.uriTemplate = s.editors[+v.slice(2)].template;
+          s.askOnInsert = v === 'ask';
+          if (!s.askOnInsert) {
+            const p = this.plugin.editorPresets().find((x) => x.key === v);
+            if (p) s.uriTemplate = p.template;
+          }
           await save(false);
           // Re-render only when the JetBrains product picker needs to appear/disappear;
           // other switches change nothing else on the pane, so the scroll stays put.
@@ -195,6 +195,11 @@ class CodeLinkerSettingTab extends PluginSettingTab {
         .setDesc(t('set.editors.desc'))
         .addButton((b) => b.setButtonText(t('set.editors.add')).setCta().onClick(async () => { editors.push({ name: '', template: '' }); s.editors = editors; await save(false); this.display(); }));
     }
+
+    new Setting(containerEl)
+      .setName(t('set.statusBar.name'))
+      .setDesc(t('set.statusBar.desc'))
+      .addToggle((c) => c.setValue(s.showStatusBar).onChange(async (v) => { s.showStatusBar = v; await save(false); }));
 
     new Setting(containerEl).setName(t('set.minChars.name')).setDesc(t('set.minChars.desc')).addText((c) => {
       c.inputEl.type = 'number';

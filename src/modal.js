@@ -37,4 +37,19 @@ class CodeLinkModal extends FuzzySuggestModal {
   }
 }
 
-module.exports = { CodeLinkModal };
+// Small fuzzy picker over editor presets ({ label, ... }). Used to switch the
+// default editor and to choose a format per insert ("Always ask" / "Insert as…").
+class PresetPickerModal extends FuzzySuggestModal {
+  constructor(app, items, onChoose, placeholder) {
+    super(app);
+    this.items = items;
+    this.onChoose = onChoose;
+    if (placeholder) this.setPlaceholder(placeholder);
+  }
+
+  getItems() { return this.items; }
+  getItemText(p) { return p.label; }
+  onChooseItem(p) { this.onChoose(p); }
+}
+
+module.exports = { CodeLinkModal, PresetPickerModal };

@@ -15,14 +15,14 @@ const fsp = fs.promises;
 const readline = require('readline');
 const nodePath = require('path');
 
-const { PRESETS, DEFAULT_SETTINGS, splitLines, inTableCell } = require('./constants');
+const { PRESETS, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, splitLines, inTableCell } = require('./constants');
 
 // A declaration line is never this wide; the cap bounds backtracking from a
 // greedy user regex on a minified file so indexing can't hang.
 const MAX_PARSE_LINE_LENGTH = 2000;
 const { BUILTIN_LANGUAGES } = require('./builtin-languages');
 const { CodeIndexSuggest } = require('./suggest');
-const { CodeLinkModal } = require('./modal');
+const { CodeLinkModal, PresetPickerModal } = require('./modal');
 const { CodeLinkerSettingTab } = require('./settings-tab');
 const { initI18n, t, plural } = require('./i18n');
 const api = require('./api');
@@ -66,10 +66,17 @@ class CodeLinkerPlugin extends Plugin {
     );
     this.addSettingTab(new CodeLinkerSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
+    this.editorStatusEl = this.addStatusBarItem();
+    this.editorStatusEl.addClass('mod-clickable');
+    this.editorStatusEl.setAttribute('aria-label', t('status.editorTooltip'));
+    this.editorStatusEl.addEventListener('click', () => this.switchPreset());
+    this.updateStatusBar();
     this.addCommand({ id: 'rebuild-code-index', name: t('cmd.rebuildIndex'), callback: () => this.rebuildIndex(true) });
-    this.addCommand({ id: 'insert-code-link', name: t('cmd.insertLink'), editorCallback: (editor) => this.pickEntry((e) => this.insertLink(editor, e)) });
-    this.addCommand({ id: 'open-code-file', name: t('cmd.openFile'), callback: () => this.pickEntry((e) => this.openEntry(e)) });
-    this.addCommand({ id: 'copy-code-link', name: t('cmd.copyLink'), callback: () => this.pickEntry((e) => this.copyLink(e)) });
+    this.addCommand({ id: 'insert-code-link', name: t('cmd.insertLink'), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLink(editor, e, tpl))) });
+    this.addCommand({ id: 'insert-code-link-as', name: t('cmd.insertLinkAs'), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(true, (tpl) => this.insertLink(editor, e, tpl))) });
+    this.addCommand({ id: 'switch-editor-preset', name: t('cmd.switchPreset'), callback: () => this.switchPreset() });
+    this.addCommand({ id: 'open-code-file', name: t('cmd.openFile'), callback: () => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.openEntry(e, tpl))) });
+    this.addCommand({ id: 'copy-code-link', name: t('cmd.copyLink'), callback: () => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.copyLink(e, tpl))) });
     this.addCommand({ id: 'convert-selection-to-link', name: t('cmd.convertSelection'), editorCallback: (editor) => this.convertSelection(editor) });
     this.addCommand({ id: 'open-selected-code', name: t('cmd.openSelection'), editorCallback: (editor) => this.openSelection(editor) });
 
@@ -509,7 +516,8 @@ class CodeLinkerPlugin extends Plugin {
 
   // {root} stays in the link for portability (resolved on render/click); call
   // fillRoot() on the result when opening the URI directly, with no note involved.
-  buildUri(e) {
+  // `template` overrides the default preset (used by "Always ask"/"Insert as…").
+  buildUri(e, template) {
     const root = this.codeRoot();
     const absFs = root ? nodePath.join(root, e.path) : e.path;
     const absFwd = absFs.split(nodePath.sep).join('/');
@@ -521,7 +529,7 @@ class CodeLinkerPlugin extends Plugin {
     // JetBrains' ?project=&path= query). {abs} keeps encodeURI for the drive
     // colon (C:); path segments use encodeURIComponent, which has no colon.
     const encPath = (p) => p.split('/').map(encodeURIComponent).join('/');
-    return this.settings.uriTemplate
+    return (template || this.settings.uriTemplate)
       .replace(/{abs}/g, encodeURI(absFwd))
       .replace(/{path}/g, encPath(e.path))
       .replace(/{line}/g, line)
@@ -531,8 +539,8 @@ class CodeLinkerPlugin extends Plugin {
   }
 
   // The markdown link to insert. Inside a table cell a literal pipe splits the row.
-  buildLink(e, inTable) {
-    const link = `[${e.name}](${this.buildUri(e)})`;
+  buildLink(e, inTable, template) {
+    const link = `[${e.name}](${this.buildUri(e, template)})`;
     return inTable ? link.replace(/\|/g, '\\|') : link;
   }
 
@@ -540,19 +548,75 @@ class CodeLinkerPlugin extends Plugin {
     new CodeLinkModal(this.app, this, { onChoose, query }).open();
   }
 
-  insertLink(editor, e) {
+  insertLink(editor, e, template) {
     const inTable = inTableCell(editor.getValue(), editor.posToOffset(editor.getCursor('from')));
-    editor.replaceSelection(this.buildLink(e, inTable));
+    editor.replaceSelection(this.buildLink(e, inTable, template));
   }
 
-  copyLink(e) {
-    navigator.clipboard.writeText(this.buildLink(e));
+  // The selectable presets — built-ins then the user's own — as { key, label, template },
+  // where key is the value the settings dropdown stores ('u:<i>' for a user editor).
+  editorPresets() {
+    const out = [
+      { key: 'file', label: t('set.preset.file'), template: PRESETS.file },
+      { key: 'vscode', label: t('set.preset.vscode'), template: PRESETS.vscode },
+      { key: 'jetbrains', label: t('set.preset.jetbrains'), template: PRESETS.jetbrains },
+    ];
+    (this.settings.editors || []).forEach((e, i) =>
+      out.push({ key: 'u:' + i, label: e.name || `Editor ${i + 1}`, template: e.template }));
+    return out;
+  }
+
+  updateStatusBar() {
+    const el = this.editorStatusEl;
+    if (!el) return;
+    if (!this.settings.showStatusBar) { el.hide(); return; }
+    const p = this.editorPresets().find((x) => x.template === this.settings.uriTemplate);
+    const name = this.settings.askOnInsert ? t('set.preset.ask') : (p ? p.label : this.settings.uriTemplate);
+    el.show();
+    el.setText(t('status.editor', { name }));
+  }
+
+  // Pick a preset from `items`; when JetBrains is chosen, follow with the IDE picker.
+  // Calls done(preset, ide) — ide is { key, label } for JetBrains, else null.
+  pickPreset(items, placeholder, done) {
+    new PresetPickerModal(this.app, items, (p) => {
+      if (p.key !== 'jetbrains') return done(p, null);
+      const ides = JETBRAINS_PRODUCTS.map(([key, label]) => ({ key, label }));
+      new PresetPickerModal(this.app, ides, (ide) => done(p, ide), t('modal.productPlaceholder')).open();
+    }, placeholder).open();
+  }
+
+  // Run `run(template)` for a link action, prompting for the format only when `ask`
+  // is set (always-ask mode or the "…as" command); a JetBrains IDE bakes into the template.
+  withFormat(ask, run) {
+    if (!ask) { run(undefined); return; }
+    this.pickPreset(this.editorPresets(), t('modal.formatPlaceholder'), (p, ide) =>
+      run(ide ? p.template.replace('{product}', ide.key) : p.template));
+  }
+
+  // Switch the default preset (or "Always ask") without opening settings; a chosen
+  // JetBrains IDE also updates the JetBrains IDE setting.
+  switchPreset() {
+    const items = this.editorPresets().concat({ key: 'ask', label: t('set.preset.ask') });
+    this.pickPreset(items, t('modal.switchPlaceholder'), async (p, ide) => {
+      this.settings.askOnInsert = p.key === 'ask';
+      if (p.key !== 'ask') {
+        this.settings.uriTemplate = p.template;
+        if (ide) this.settings.jetbrainsProduct = ide.key;
+      }
+      await this.saveSettings();
+      new Notice(t('notice.editorSet', { name: ide ? ide.label : p.label }));
+    });
+  }
+
+  copyLink(e, template) {
+    navigator.clipboard.writeText(this.buildLink(e, false, template));
     new Notice(t('notice.copied'));
   }
 
   // fillRoot resolves the portable {root} token, since there's no note to render it.
-  openEntry(e) {
-    window.open(this.fillRoot(this.buildUri(e)));
+  openEntry(e, template) {
+    window.open(this.fillRoot(this.buildUri(e, template)));
   }
 
   // Entries matched by name, or by path tail so a selected "Foo/Bar.cs" resolves too.
@@ -595,14 +659,14 @@ class CodeLinkerPlugin extends Plugin {
   }
 
   convertSelection(editor) {
-    this.resolveSelection(editor, (e, target) => {
+    this.resolveSelection(editor, (e, target) => this.withFormat(this.settings.askOnInsert, (template) => {
       const inTable = inTableCell(editor.getValue(), editor.posToOffset(target.from));
-      editor.replaceRange(this.buildLink(e, inTable), target.from, target.to);
-    });
+      editor.replaceRange(this.buildLink(e, inTable, template), target.from, target.to);
+    }));
   }
 
   openSelection(editor) {
-    this.resolveSelection(editor, (e) => this.openEntry(e));
+    this.resolveSelection(editor, (e) => this.withFormat(this.settings.askOnInsert, (template) => this.openEntry(e, template)));
   }
 
   scanRootStatus() {
@@ -615,6 +679,7 @@ class CodeLinkerPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+    this.updateStatusBar();
   }
 }
 

@@ -6,13 +6,15 @@ module.exports = {
   // Commands
   'cmd.rebuildIndex': 'Rebuild code index',
   'cmd.insertLink': 'Insert code link',
+  'cmd.insertLinkAs': 'Insert code link as…',
+  'cmd.switchPreset': 'Switch editor preset',
   'cmd.openFile': 'Open code file',
   'cmd.copyLink': 'Copy code link',
   'cmd.convertSelection': 'Convert selection to code link',
   'cmd.openSelection': 'Find and open code',
 
   // Editor context menu
-  'menu.convert': 'Convert to code link',
+  'menu.convert': 'Find and convert to link',
 
   // Notices
   'notice.noCodeRoot': 'Code Linker: could not determine code root',
@@ -22,15 +24,21 @@ module.exports = {
   'notice.indexed': 'Code Linker: {entries} indexed',
   'notice.missingFolders': 'Code Linker: scan folder not found — {folders}',
   'notice.copied': 'Code Linker: link copied',
+  'notice.editorSet': 'Code Linker: links now open in {name}',
   'notice.noSelection': 'Code Linker: select a name or path first',
   'notice.noMatch': 'Code Linker: no code entry matches “{query}”',
   'notice.watchUnsupported': 'Code Linker: auto-refresh is unavailable on this platform — rebuild manually',
 
   // Status bar
   'status.indexing': 'Code Linker: indexing… {n}',
+  'status.editor': 'Code link: {name}',
+  'status.editorTooltip': 'Code Linker: click to switch the editor links open in',
 
   // Command-palette modal
   'modal.searchPlaceholder': 'Search code files and types…',
+  'modal.switchPlaceholder': 'Choose the editor links open in…',
+  'modal.formatPlaceholder': 'Choose an editor format for this link…',
+  'modal.productPlaceholder': 'Choose a JetBrains IDE…',
 
   // Settings — headings
   'set.heading.index': 'Code index',
@@ -76,7 +84,8 @@ module.exports = {
   'set.editorPreset.desc': 'Which editor the inserted links open in. Add your own under “Your editors” below.',
   'set.preset.vscode': 'VS Code',
   'set.preset.jetbrains': 'JetBrains',
-  'set.preset.file': 'file:// (open in default)',
+  'set.preset.file': 'file://',
+  'set.preset.ask': 'Always ask',
   'set.jetbrainsProduct.name': 'JetBrains IDE',
   'set.jetbrainsProduct.desc': 'Which JetBrains IDE the links open in.',
   'set.editors.name': 'Your editors',
@@ -87,6 +96,8 @@ module.exports = {
   'set.editors.namePlaceholder': 'Name',
   'set.editors.remove': 'Remove',
   'set.editors.add': '+ Add editor',
+  'set.statusBar.name': 'Show editor in status bar',
+  'set.statusBar.desc': 'Show the active editor preset in the status bar; click it to switch without opening settings.',
   'set.minChars.name': 'Min characters',
   'set.minChars.desc': 'How many characters to type before suggestions appear.',
   'set.maxResults.name': 'Max results',
@@ -95,7 +106,7 @@ module.exports = {
   'set.autoRefresh.desc': 'Watch the scan folders and rebuild the index when source files change.',
   'set.autoRefresh.unsupported': 'Recursive folder watching isn’t supported on this platform (Linux); rebuild manually instead.',
   'set.contextMenu.name': 'Editor context menu',
-  'set.contextMenu.desc': 'Add “Convert to code link” and “Find and open code” to the editor right-click menu.',
+  'set.contextMenu.desc': 'Add “Find and convert to link” and “Find and open code” to the editor right-click menu.',
   'set.info': 'Code root: {root} · {entries} indexed',
   'set.info.unknownRoot': '(unknown)',
 

@@ -19,7 +19,7 @@ var require_constants = __commonJS({
       // so the link text stays portable across machines.
       file: "file:///{root}/{path}"
     };
-    var JETBRAINS_PRODUCTS = [
+    var JETBRAINS_PRODUCTS2 = [
       ["idea", "IntelliJ IDEA"],
       ["pycharm", "PyCharm"],
       ["webstorm", "WebStorm"],
@@ -44,6 +44,10 @@ var require_constants = __commonJS({
       // one folder name per line
       editors: [],
       // user-defined editor presets, each { name, template }
+      askOnInsert: false,
+      // ask which editor format to use on every insert (vs. the fixed preset)
+      showStatusBar: false,
+      // show the active editor preset in the status bar, click to switch
       enabledLanguages: null,
       // null on first run => every built-in enabled
       languagesFile: "code-languages.json",
@@ -109,7 +113,7 @@ var require_constants = __commonJS({
           return true;
       return false;
     }
-    module2.exports = { PRESETS: PRESETS2, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, splitLines: splitLines2, isProtected, inTableCell: inTableCell2 };
+    module2.exports = { PRESETS: PRESETS2, JETBRAINS_PRODUCTS: JETBRAINS_PRODUCTS2, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, splitLines: splitLines2, isProtected, inTableCell: inTableCell2 };
   }
 });
 
@@ -308,10 +312,13 @@ var require_suggest = __commonJS({
         if (!ctx)
           return;
         const inTable = inTableCell2(ctx.editor.getValue(), ctx.editor.posToOffset(ctx.start));
-        const link = this.plugin.buildLink(e, inTable);
-        ctx.editor.replaceRange(link, ctx.start, ctx.end);
-        const pos = ctx.editor.posToOffset(ctx.start) + link.length;
-        ctx.editor.setCursor(ctx.editor.offsetToPos(pos));
+        const insert = (template) => {
+          const link = this.plugin.buildLink(e, inTable, template);
+          ctx.editor.replaceRange(link, ctx.start, ctx.end);
+          const pos = ctx.editor.posToOffset(ctx.start) + link.length;
+          ctx.editor.setCursor(ctx.editor.offsetToPos(pos));
+        };
+        this.plugin.withFormat(this.plugin.settings.askOnInsert, insert);
       }
     };
     module2.exports = { CodeIndexSuggest: CodeIndexSuggest2 };
@@ -326,12 +333,14 @@ var require_en = __commonJS({
       // Commands
       "cmd.rebuildIndex": "Rebuild code index",
       "cmd.insertLink": "Insert code link",
+      "cmd.insertLinkAs": "Insert code link as\u2026",
+      "cmd.switchPreset": "Switch editor preset",
       "cmd.openFile": "Open code file",
       "cmd.copyLink": "Copy code link",
       "cmd.convertSelection": "Convert selection to code link",
       "cmd.openSelection": "Find and open code",
       // Editor context menu
-      "menu.convert": "Convert to code link",
+      "menu.convert": "Find and convert to link",
       // Notices
       "notice.noCodeRoot": "Code Linker: could not determine code root",
       "notice.noScanFolders": "Code Linker: no scan folders configured (see settings)",
@@ -340,13 +349,19 @@ var require_en = __commonJS({
       "notice.indexed": "Code Linker: {entries} indexed",
       "notice.missingFolders": "Code Linker: scan folder not found \u2014 {folders}",
       "notice.copied": "Code Linker: link copied",
+      "notice.editorSet": "Code Linker: links now open in {name}",
       "notice.noSelection": "Code Linker: select a name or path first",
       "notice.noMatch": "Code Linker: no code entry matches \u201C{query}\u201D",
       "notice.watchUnsupported": "Code Linker: auto-refresh is unavailable on this platform \u2014 rebuild manually",
       // Status bar
       "status.indexing": "Code Linker: indexing\u2026 {n}",
+      "status.editor": "Code link: {name}",
+      "status.editorTooltip": "Code Linker: click to switch the editor links open in",
       // Command-palette modal
       "modal.searchPlaceholder": "Search code files and types\u2026",
+      "modal.switchPlaceholder": "Choose the editor links open in\u2026",
+      "modal.formatPlaceholder": "Choose an editor format for this link\u2026",
+      "modal.productPlaceholder": "Choose a JetBrains IDE\u2026",
       // Settings — headings
       "set.heading.index": "Code index",
       "set.heading.languages": "Languages",
@@ -387,7 +402,8 @@ var require_en = __commonJS({
       "set.editorPreset.desc": "Which editor the inserted links open in. Add your own under \u201CYour editors\u201D below.",
       "set.preset.vscode": "VS Code",
       "set.preset.jetbrains": "JetBrains",
-      "set.preset.file": "file:// (open in default)",
+      "set.preset.file": "file://",
+      "set.preset.ask": "Always ask",
       "set.jetbrainsProduct.name": "JetBrains IDE",
       "set.jetbrainsProduct.desc": "Which JetBrains IDE the links open in.",
       "set.editors.name": "Your editors",
@@ -398,6 +414,8 @@ var require_en = __commonJS({
       "set.editors.namePlaceholder": "Name",
       "set.editors.remove": "Remove",
       "set.editors.add": "+ Add editor",
+      "set.statusBar.name": "Show editor in status bar",
+      "set.statusBar.desc": "Show the active editor preset in the status bar; click it to switch without opening settings.",
       "set.minChars.name": "Min characters",
       "set.minChars.desc": "How many characters to type before suggestions appear.",
       "set.maxResults.name": "Max results",
@@ -406,7 +424,7 @@ var require_en = __commonJS({
       "set.autoRefresh.desc": "Watch the scan folders and rebuild the index when source files change.",
       "set.autoRefresh.unsupported": "Recursive folder watching isn\u2019t supported on this platform (Linux); rebuild manually instead.",
       "set.contextMenu.name": "Editor context menu",
-      "set.contextMenu.desc": "Add \u201CConvert to code link\u201D and \u201CFind and open code\u201D to the editor right-click menu.",
+      "set.contextMenu.desc": "Add \u201CFind and convert to link\u201D and \u201CFind and open code\u201D to the editor right-click menu.",
       "set.info": "Code root: {root} \xB7 {entries} indexed",
       "set.info.unknownRoot": "(unknown)",
       // Plural noun phrases
@@ -423,12 +441,14 @@ var require_ru = __commonJS({
       // Commands
       "cmd.rebuildIndex": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043A\u043E\u0434\u0430",
       "cmd.insertLink": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
+      "cmd.insertLinkAs": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434 \u043A\u0430\u043A\u2026",
+      "cmd.switchPreset": "\u0421\u043C\u0435\u043D\u0438\u0442\u044C \u043F\u0440\u0435\u0441\u0435\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430",
       "cmd.openFile": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0444\u0430\u0439\u043B \u043A\u043E\u0434\u0430",
       "cmd.copyLink": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
       "cmd.convertSelection": "\u041F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u0435 \u0432 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
       "cmd.openSelection": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434",
       // Editor context menu
-      "menu.convert": "\u041F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
+      "menu.convert": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
       // Notices
       "notice.noCodeRoot": "Code Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u044C \u043A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430",
       "notice.noScanFolders": "Code Linker: \u043D\u0435 \u0437\u0430\u0434\u0430\u043D\u044B \u043F\u0430\u043F\u043A\u0438 \u0434\u043B\u044F \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F (\u0441\u043C. \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438)",
@@ -437,13 +457,19 @@ var require_ru = __commonJS({
       "notice.indexed": "Code Linker: \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
       "notice.missingFolders": "Code Linker: \u043F\u0430\u043F\u043A\u0430 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u2014 {folders}",
       "notice.copied": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u0430",
+      "notice.editorSet": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0438 \u0442\u0435\u043F\u0435\u0440\u044C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432 {name}",
       "notice.noSelection": "Code Linker: \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u044B\u0434\u0435\u043B\u0438\u0442\u0435 \u0438\u043C\u044F \u0438\u043B\u0438 \u043F\u0443\u0442\u044C",
       "notice.noMatch": "Code Linker: \u043D\u0435\u0442 \u0437\u0430\u043F\u0438\u0441\u0438 \u043A\u043E\u0434\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
       "notice.watchUnsupported": "Code Linker: \u0430\u0432\u0442\u043E\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 \u2014 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
       // Status bar
       "status.indexing": "Code Linker: \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435\u2026 {n}",
+      "status.editor": "\u0421\u0441\u044B\u043B\u043A\u0430 \u043D\u0430 \u043A\u043E\u0434: {name}",
+      "status.editorTooltip": "Code Linker: \u043A\u043B\u0438\u043A \u2014 \u0441\u043C\u0435\u043D\u0438\u0442\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440, \u0432 \u043A\u043E\u0442\u043E\u0440\u043E\u043C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0441\u0441\u044B\u043B\u043A\u0438",
       // Command-palette modal
       "modal.searchPlaceholder": "\u041F\u043E\u0438\u0441\u043A \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u0442\u0438\u043F\u043E\u0432 \u043A\u043E\u0434\u0430\u2026",
+      "modal.switchPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440, \u0432 \u043A\u043E\u0442\u043E\u0440\u043E\u043C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0441\u0441\u044B\u043B\u043A\u0438\u2026",
+      "modal.formatPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430 \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u0441\u0441\u044B\u043B\u043A\u0438\u2026",
+      "modal.productPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 IDE JetBrains\u2026",
       // Settings — headings
       "set.heading.index": "\u0418\u043D\u0434\u0435\u043A\u0441 \u043A\u043E\u0434\u0430",
       "set.heading.languages": "\u042F\u0437\u044B\u043A\u0438",
@@ -484,7 +510,8 @@ var require_ru = __commonJS({
       "set.editorPreset.desc": "\u0412 \u043A\u0430\u043A\u043E\u043C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0435 \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438. \u0421\u0432\u043E\u0438 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u044E\u0442\u0441\u044F \u0432 \xAB\u0412\u0430\u0448\u0438 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u044B\xBB \u043D\u0438\u0436\u0435.",
       "set.preset.vscode": "VS Code",
       "set.preset.jetbrains": "JetBrains",
-      "set.preset.file": "file:// (\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0432 \u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0438 \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E)",
+      "set.preset.file": "file://",
+      "set.preset.ask": "\u0412\u0441\u0435\u0433\u0434\u0430 \u0441\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0442\u044C",
       "set.jetbrainsProduct.name": "IDE JetBrains",
       "set.jetbrainsProduct.desc": "\u0412 \u043A\u0430\u043A\u043E\u0439 JetBrains IDE \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0441\u0441\u044B\u043B\u043A\u0438.",
       "set.editors.name": "\u0412\u0430\u0448\u0438 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u044B",
@@ -495,6 +522,8 @@ var require_ru = __commonJS({
       "set.editors.namePlaceholder": "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435",
       "set.editors.remove": "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
       "set.editors.add": "+ \u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440",
+      "set.statusBar.name": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440 \u0432 \u0441\u0442\u0430\u0442\u0443\u0441-\u0431\u0430\u0440\u0435",
+      "set.statusBar.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0439 \u043F\u0440\u0435\u0441\u0435\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430 \u0432 \u0441\u0442\u0430\u0442\u0443\u0441-\u0431\u0430\u0440\u0435; \u043A\u043B\u0438\u043A \u043F\u043E \u043D\u0435\u043C\u0443 \u043C\u0435\u043D\u044F\u0435\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440 \u0431\u0435\u0437 \u0432\u0445\u043E\u0434\u0430 \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438.",
       "set.minChars.name": "\u041C\u0438\u043D\u0438\u043C\u0443\u043C \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432",
       "set.minChars.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432 \u0432\u0432\u0435\u0441\u0442\u0438, \u043F\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043C \u043F\u043E\u044F\u0432\u044F\u0442\u0441\u044F \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438.",
       "set.maxResults.name": "\u041C\u0430\u043A\u0441\u0438\u043C\u0443\u043C \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u043E\u0432",
@@ -503,7 +532,7 @@ var require_ru = __commonJS({
       "set.autoRefresh.desc": "\u0421\u043B\u0435\u0434\u0438\u0442\u044C \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0440\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0438\u0441\u0445\u043E\u0434\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432.",
       "set.autoRefresh.unsupported": "\u0420\u0435\u043A\u0443\u0440\u0441\u0438\u0432\u043D\u043E\u0435 \u0441\u043B\u0435\u0436\u0435\u043D\u0438\u0435 \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u043D\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 (Linux); \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E.",
       "set.contextMenu.name": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430",
-      "set.contextMenu.desc": "\u0414\u043E\u0431\u0430\u0432\u043B\u044F\u0442\u044C \xAB\u041F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434\xBB \u0438 \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434\xBB \u0432 \u043C\u0435\u043D\u044E \u043F\u043E \u043F\u0440\u0430\u0432\u043E\u043C\u0443 \u043A\u043B\u0438\u043A\u0443.",
+      "set.contextMenu.desc": "\u0414\u043E\u0431\u0430\u0432\u043B\u044F\u0442\u044C \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443\xBB \u0438 \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434\xBB \u0432 \u043C\u0435\u043D\u044E \u043F\u043E \u043F\u0440\u0430\u0432\u043E\u043C\u0443 \u043A\u043B\u0438\u043A\u0443.",
       "set.info": "\u041A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430: {root} \xB7 \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
       "set.info.unknownRoot": "(\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E)",
       // Plural noun phrases
@@ -596,7 +625,25 @@ var require_modal = __commonJS({
         this.onChoose(e);
       }
     };
-    module2.exports = { CodeLinkModal: CodeLinkModal2 };
+    var PresetPickerModal2 = class extends FuzzySuggestModal {
+      constructor(app, items, onChoose, placeholder) {
+        super(app);
+        this.items = items;
+        this.onChoose = onChoose;
+        if (placeholder)
+          this.setPlaceholder(placeholder);
+      }
+      getItems() {
+        return this.items;
+      }
+      getItemText(p) {
+        return p.label;
+      }
+      onChooseItem(p) {
+        this.onChoose(p);
+      }
+    };
+    module2.exports = { CodeLinkModal: CodeLinkModal2, PresetPickerModal: PresetPickerModal2 };
   }
 });
 
@@ -605,7 +652,7 @@ var require_settings_tab = __commonJS({
   "src/settings-tab.js"(exports2, module2) {
     "use strict";
     var { PluginSettingTab, Setting } = require("obsidian");
-    var { PRESETS: PRESETS2, JETBRAINS_PRODUCTS } = require_constants();
+    var { PRESETS: PRESETS2, JETBRAINS_PRODUCTS: JETBRAINS_PRODUCTS2 } = require_constants();
     var { t: t2, plural: plural2 } = require_i18n();
     var CodeLinkerSettingTab2 = class extends PluginSettingTab {
       constructor(app, plugin) {
@@ -613,15 +660,13 @@ var require_settings_tab = __commonJS({
         this.plugin = plugin;
         this.expanded = /* @__PURE__ */ new Set();
       }
-      // The preset dropdown key matching the active template: a built-in preset, or
-      // 'u:<i>' for one of the user's editors. Migration guarantees a match.
+      // The dropdown key for the active preset: 'ask' in always-ask mode, a built-in
+      // preset, or 'u:<i>' for a user editor. Migration guarantees a template match.
       selectedEditor() {
-        const tpl = this.plugin.settings.uriTemplate;
-        for (const k of Object.keys(PRESETS2))
-          if (PRESETS2[k] === tpl)
-            return k;
-        const i = (this.plugin.settings.editors || []).findIndex((e) => e.template === tpl);
-        return i >= 0 ? "u:" + i : "file";
+        if (this.plugin.settings.askOnInsert)
+          return "ask";
+        const p = this.plugin.editorPresets().find((x) => x.template === this.plugin.settings.uriTemplate);
+        return p ? p.key : "file";
       }
       // The kinds a language contributes to the index, each with a searchable toggle.
       renderSearchableKinds(lang) {
@@ -747,16 +792,17 @@ var require_settings_tab = __commonJS({
           await save(false);
         }));
         new Setting(containerEl).setName(t2("set.editorPreset.name")).setDesc(t2("set.editorPreset.desc")).addDropdown((d) => {
-          d.addOption("file", t2("set.preset.file"));
-          d.addOption("vscode", t2("set.preset.vscode"));
-          d.addOption("jetbrains", t2("set.preset.jetbrains"));
-          (s.editors || []).forEach((e, i) => d.addOption("u:" + i, e.name || `Editor ${i + 1}`));
+          for (const p of this.plugin.editorPresets())
+            d.addOption(p.key, p.label);
+          d.addOption("ask", t2("set.preset.ask"));
           d.setValue(this.selectedEditor()).onChange(async (v) => {
             const wasJetbrains = this.selectedEditor() === "jetbrains";
-            if (PRESETS2[v])
-              s.uriTemplate = PRESETS2[v];
-            else if (v.startsWith("u:"))
-              s.uriTemplate = s.editors[+v.slice(2)].template;
+            s.askOnInsert = v === "ask";
+            if (!s.askOnInsert) {
+              const p = this.plugin.editorPresets().find((x) => x.key === v);
+              if (p)
+                s.uriTemplate = p.template;
+            }
             await save(false);
             if (wasJetbrains !== (v === "jetbrains"))
               this.display();
@@ -764,7 +810,7 @@ var require_settings_tab = __commonJS({
         });
         if (this.selectedEditor() === "jetbrains") {
           new Setting(containerEl).setName(t2("set.jetbrainsProduct.name")).setDesc(t2("set.jetbrainsProduct.desc")).addDropdown((d) => {
-            for (const [code, label] of JETBRAINS_PRODUCTS)
+            for (const [code, label] of JETBRAINS_PRODUCTS2)
               d.addOption(code, label);
             d.setValue(s.jetbrainsProduct).onChange(async (v) => {
               s.jetbrainsProduct = v;
@@ -811,6 +857,10 @@ var require_settings_tab = __commonJS({
             this.display();
           }));
         }
+        new Setting(containerEl).setName(t2("set.statusBar.name")).setDesc(t2("set.statusBar.desc")).addToggle((c) => c.setValue(s.showStatusBar).onChange(async (v) => {
+          s.showStatusBar = v;
+          await save(false);
+        }));
         new Setting(containerEl).setName(t2("set.minChars.name")).setDesc(t2("set.minChars.desc")).addText((c) => {
           c.inputEl.type = "number";
           c.setValue(String(s.minChars)).onChange(async (v) => {
@@ -929,11 +979,11 @@ var fs = require("fs");
 var fsp = fs.promises;
 var readline = require("readline");
 var nodePath = require("path");
-var { PRESETS, DEFAULT_SETTINGS, splitLines, inTableCell } = require_constants();
+var { PRESETS, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, splitLines, inTableCell } = require_constants();
 var MAX_PARSE_LINE_LENGTH = 2e3;
 var { BUILTIN_LANGUAGES } = require_builtin_languages();
 var { CodeIndexSuggest } = require_suggest();
-var { CodeLinkModal } = require_modal();
+var { CodeLinkModal, PresetPickerModal } = require_modal();
 var { CodeLinkerSettingTab } = require_settings_tab();
 var { initI18n, t, plural } = require_i18n();
 var api = require_api();
@@ -966,10 +1016,17 @@ var CodeLinkerPlugin = class extends Plugin {
     );
     this.addSettingTab(new CodeLinkerSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
+    this.editorStatusEl = this.addStatusBarItem();
+    this.editorStatusEl.addClass("mod-clickable");
+    this.editorStatusEl.setAttribute("aria-label", t("status.editorTooltip"));
+    this.editorStatusEl.addEventListener("click", () => this.switchPreset());
+    this.updateStatusBar();
     this.addCommand({ id: "rebuild-code-index", name: t("cmd.rebuildIndex"), callback: () => this.rebuildIndex(true) });
-    this.addCommand({ id: "insert-code-link", name: t("cmd.insertLink"), editorCallback: (editor) => this.pickEntry((e) => this.insertLink(editor, e)) });
-    this.addCommand({ id: "open-code-file", name: t("cmd.openFile"), callback: () => this.pickEntry((e) => this.openEntry(e)) });
-    this.addCommand({ id: "copy-code-link", name: t("cmd.copyLink"), callback: () => this.pickEntry((e) => this.copyLink(e)) });
+    this.addCommand({ id: "insert-code-link", name: t("cmd.insertLink"), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLink(editor, e, tpl))) });
+    this.addCommand({ id: "insert-code-link-as", name: t("cmd.insertLinkAs"), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(true, (tpl) => this.insertLink(editor, e, tpl))) });
+    this.addCommand({ id: "switch-editor-preset", name: t("cmd.switchPreset"), callback: () => this.switchPreset() });
+    this.addCommand({ id: "open-code-file", name: t("cmd.openFile"), callback: () => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.openEntry(e, tpl))) });
+    this.addCommand({ id: "copy-code-link", name: t("cmd.copyLink"), callback: () => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.copyLink(e, tpl))) });
     this.addCommand({ id: "convert-selection-to-link", name: t("cmd.convertSelection"), editorCallback: (editor) => this.convertSelection(editor) });
     this.addCommand({ id: "open-selected-code", name: t("cmd.openSelection"), editorCallback: (editor) => this.openSelection(editor) });
     this.registerEvent(
@@ -1394,7 +1451,8 @@ var CodeLinkerPlugin = class extends Plugin {
   }
   // {root} stays in the link for portability (resolved on render/click); call
   // fillRoot() on the result when opening the URI directly, with no note involved.
-  buildUri(e) {
+  // `template` overrides the default preset (used by "Always ask"/"Insert as…").
+  buildUri(e, template) {
     const root = this.codeRoot();
     const absFs = root ? nodePath.join(root, e.path) : e.path;
     const absFwd = absFs.split(nodePath.sep).join("/");
@@ -1402,27 +1460,85 @@ var CodeLinkerPlugin = class extends Plugin {
     const project = (e.path.split("/")[0] || "").trim();
     const product = this.settings.jetbrainsProduct || "idea";
     const encPath = (p) => p.split("/").map(encodeURIComponent).join("/");
-    return this.settings.uriTemplate.replace(/{abs}/g, encodeURI(absFwd)).replace(/{path}/g, encPath(e.path)).replace(/{line}/g, line).replace(/{name}/g, encodeURIComponent(e.name)).replace(/{project}/g, encodeURIComponent(project)).replace(/{product}/g, product);
+    return (template || this.settings.uriTemplate).replace(/{abs}/g, encodeURI(absFwd)).replace(/{path}/g, encPath(e.path)).replace(/{line}/g, line).replace(/{name}/g, encodeURIComponent(e.name)).replace(/{project}/g, encodeURIComponent(project)).replace(/{product}/g, product);
   }
   // The markdown link to insert. Inside a table cell a literal pipe splits the row.
-  buildLink(e, inTable) {
-    const link = `[${e.name}](${this.buildUri(e)})`;
+  buildLink(e, inTable, template) {
+    const link = `[${e.name}](${this.buildUri(e, template)})`;
     return inTable ? link.replace(/\|/g, "\\|") : link;
   }
   pickEntry(onChoose, query) {
     new CodeLinkModal(this.app, this, { onChoose, query }).open();
   }
-  insertLink(editor, e) {
+  insertLink(editor, e, template) {
     const inTable = inTableCell(editor.getValue(), editor.posToOffset(editor.getCursor("from")));
-    editor.replaceSelection(this.buildLink(e, inTable));
+    editor.replaceSelection(this.buildLink(e, inTable, template));
   }
-  copyLink(e) {
-    navigator.clipboard.writeText(this.buildLink(e));
+  // The selectable presets — built-ins then the user's own — as { key, label, template },
+  // where key is the value the settings dropdown stores ('u:<i>' for a user editor).
+  editorPresets() {
+    const out = [
+      { key: "file", label: t("set.preset.file"), template: PRESETS.file },
+      { key: "vscode", label: t("set.preset.vscode"), template: PRESETS.vscode },
+      { key: "jetbrains", label: t("set.preset.jetbrains"), template: PRESETS.jetbrains }
+    ];
+    (this.settings.editors || []).forEach((e, i) => out.push({ key: "u:" + i, label: e.name || `Editor ${i + 1}`, template: e.template }));
+    return out;
+  }
+  updateStatusBar() {
+    const el = this.editorStatusEl;
+    if (!el)
+      return;
+    if (!this.settings.showStatusBar) {
+      el.hide();
+      return;
+    }
+    const p = this.editorPresets().find((x) => x.template === this.settings.uriTemplate);
+    const name = this.settings.askOnInsert ? t("set.preset.ask") : p ? p.label : this.settings.uriTemplate;
+    el.show();
+    el.setText(t("status.editor", { name }));
+  }
+  // Pick a preset from `items`; when JetBrains is chosen, follow with the IDE picker.
+  // Calls done(preset, ide) — ide is { key, label } for JetBrains, else null.
+  pickPreset(items, placeholder, done) {
+    new PresetPickerModal(this.app, items, (p) => {
+      if (p.key !== "jetbrains")
+        return done(p, null);
+      const ides = JETBRAINS_PRODUCTS.map(([key, label]) => ({ key, label }));
+      new PresetPickerModal(this.app, ides, (ide) => done(p, ide), t("modal.productPlaceholder")).open();
+    }, placeholder).open();
+  }
+  // Run `run(template)` for a link action, prompting for the format only when `ask`
+  // is set (always-ask mode or the "…as" command); a JetBrains IDE bakes into the template.
+  withFormat(ask, run) {
+    if (!ask) {
+      run(void 0);
+      return;
+    }
+    this.pickPreset(this.editorPresets(), t("modal.formatPlaceholder"), (p, ide) => run(ide ? p.template.replace("{product}", ide.key) : p.template));
+  }
+  // Switch the default preset (or "Always ask") without opening settings; a chosen
+  // JetBrains IDE also updates the JetBrains IDE setting.
+  switchPreset() {
+    const items = this.editorPresets().concat({ key: "ask", label: t("set.preset.ask") });
+    this.pickPreset(items, t("modal.switchPlaceholder"), async (p, ide) => {
+      this.settings.askOnInsert = p.key === "ask";
+      if (p.key !== "ask") {
+        this.settings.uriTemplate = p.template;
+        if (ide)
+          this.settings.jetbrainsProduct = ide.key;
+      }
+      await this.saveSettings();
+      new Notice(t("notice.editorSet", { name: ide ? ide.label : p.label }));
+    });
+  }
+  copyLink(e, template) {
+    navigator.clipboard.writeText(this.buildLink(e, false, template));
     new Notice(t("notice.copied"));
   }
   // fillRoot resolves the portable {root} token, since there's no note to render it.
-  openEntry(e) {
-    window.open(this.fillRoot(this.buildUri(e)));
+  openEntry(e, template) {
+    window.open(this.fillRoot(this.buildUri(e, template)));
   }
   // Entries matched by name, or by path tail so a selected "Foo/Bar.cs" resolves too.
   lookup(text) {
@@ -1474,13 +1590,13 @@ var CodeLinkerPlugin = class extends Plugin {
       this.pickEntry(run, target.text);
   }
   convertSelection(editor) {
-    this.resolveSelection(editor, (e, target) => {
+    this.resolveSelection(editor, (e, target) => this.withFormat(this.settings.askOnInsert, (template) => {
       const inTable = inTableCell(editor.getValue(), editor.posToOffset(target.from));
-      editor.replaceRange(this.buildLink(e, inTable), target.from, target.to);
-    });
+      editor.replaceRange(this.buildLink(e, inTable, template), target.from, target.to);
+    }));
   }
   openSelection(editor) {
-    this.resolveSelection(editor, (e) => this.openEntry(e));
+    this.resolveSelection(editor, (e) => this.withFormat(this.settings.askOnInsert, (template) => this.openEntry(e, template)));
   }
   scanRootStatus() {
     const root = this.codeRoot();
@@ -1491,6 +1607,7 @@ var CodeLinkerPlugin = class extends Plugin {
   }
   async saveSettings() {
     await this.saveData(this.settings);
+    this.updateStatusBar();
   }
 };
 Object.assign(CodeLinkerPlugin.prototype, api);

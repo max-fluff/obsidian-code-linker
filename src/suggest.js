@@ -63,10 +63,13 @@ class CodeIndexSuggest extends EditorSuggest {
     const ctx = this.context;
     if (!ctx) return;
     const inTable = inTableCell(ctx.editor.getValue(), ctx.editor.posToOffset(ctx.start));
-    const link = this.plugin.buildLink(e, inTable);
-    ctx.editor.replaceRange(link, ctx.start, ctx.end);
-    const pos = ctx.editor.posToOffset(ctx.start) + link.length;
-    ctx.editor.setCursor(ctx.editor.offsetToPos(pos));
+    const insert = (template) => {
+      const link = this.plugin.buildLink(e, inTable, template);
+      ctx.editor.replaceRange(link, ctx.start, ctx.end);
+      const pos = ctx.editor.posToOffset(ctx.start) + link.length;
+      ctx.editor.setCursor(ctx.editor.offsetToPos(pos));
+    };
+    this.plugin.withFormat(this.plugin.settings.askOnInsert, insert);
   }
 }
 
