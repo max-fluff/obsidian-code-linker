@@ -11,7 +11,7 @@ await esbuild.build({
   target: 'es2018',
   outfile: 'main.js',
   banner: { js: banner },
-  external: ['obsidian', 'electron', 'fs', 'path', '@codemirror/view', '@codemirror/state'],
+  external: ['obsidian', 'electron', 'fs', 'path', '@codemirror/view', '@codemirror/state', '@codemirror/language'],
   logLevel: 'info',
 }).catch((e) => { console.error(e); process.exit(1); });
 

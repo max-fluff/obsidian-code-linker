@@ -66,9 +66,9 @@ class CodeLinkerSettingTab extends PluginSettingTab {
     });
 
     area(new Setting(containerEl).setName(t('set.scanFolders.name')).setDesc(t('set.scanFolders.desc')), () => s.scanRoots, (v) => (s.scanRoots = v));
-    for (const st of this.plugin.scanRootStatus().filter((x) => !x.exists)) {
-      const row = new Setting(containerEl).setName(st.rel).setDesc(t('set.scanFolders.notFound'));
-      row.settingEl.addClass('mod-warning');
+    const missing = this.plugin.scanRootStatus().filter((x) => !x.exists).map((x) => x.rel);
+    if (missing.length) {
+      containerEl.createEl('div', { cls: 'code-linker-section-desc', text: t('set.scanFolders.notFound', { folders: missing.join(', ') }) });
     }
     area(new Setting(containerEl).setName(t('set.skipFolders.name')).setDesc(t('set.skipFolders.desc')), () => s.skipDirs, (v) => (s.skipDirs = v));
 
@@ -124,10 +124,22 @@ class CodeLinkerSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName(t('set.heading.customLanguages')).setHeading();
     containerEl.createEl('div', { cls: 'setting-item-description', text: t('set.customLanguages.desc') });
 
-    new Setting(containerEl)
+    const langPath = this.plugin.languagesFilePath();
+    const langFile = langPath ? this.app.vault.getAbstractFileByPath(langPath) : null;
+    const langSetting = new Setting(containerEl)
       .setName(t('set.languagesFile.name'))
       .setDesc(t('set.languagesFile.desc'))
-      .addText((c) => wide(c).setValue(s.languagesFile).onChange(async (v) => { s.languagesFile = v.trim(); await save(false); }));
+      .addText((c) => {
+        c.setValue(s.languagesFile).onChange(async (v) => { s.languagesFile = v.trim(); await save(false); });
+        c.inputEl.addEventListener('blur', () => this.display()); // refresh the Create/Open button for the new path
+      });
+    if (langFile) {
+      langSetting.addExtraButton((b) => b.setIcon('pencil').setTooltip(t('set.languagesFile.open'))
+        .onClick(() => this.plugin.openLanguagesFile()));
+    } else {
+      langSetting.addButton((b) => b.setButtonText(t('set.languagesFile.create')).setCta()
+        .onClick(async () => { await this.plugin.createLanguagesFile(); this.display(); }));
+    }
 
     new Setting(containerEl)
       .setName(t('set.reloadLanguages.name'))
@@ -225,6 +237,33 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       .setName(t('set.contextMenu.name'))
       .setDesc(t('set.contextMenu.desc'))
       .addToggle((c) => c.setValue(s.contextMenu).onChange(async (v) => { s.contextMenu = v; await save(false); }));
+
+    new Setting(containerEl).setName(t('set.heading.hover')).setHeading();
+
+    new Setting(containerEl)
+      .setName(t('set.hoverPreview.name'))
+      .setDesc(t('set.hoverPreview.desc'))
+      .addToggle((c) => c.setValue(s.hoverPreview).onChange(async (v) => { s.hoverPreview = v; await save(false); }));
+
+    // -1 means "no limit" (to the start/end of the file); other negatives clamp to it.
+    new Setting(containerEl).setName(t('set.hoverBefore.name')).setDesc(t('set.hoverBefore.desc')).addText((c) => {
+      c.inputEl.type = 'number';
+      c.inputEl.min = '-1';
+      c.setValue(String(s.hoverBefore)).onChange(async (v) => { const n = parseInt(v, 10); s.hoverBefore = Number.isFinite(n) ? Math.max(-1, n) : 3; await save(false); });
+    });
+
+    new Setting(containerEl).setName(t('set.hoverAfter.name')).setDesc(t('set.hoverAfter.desc')).addText((c) => {
+      c.inputEl.type = 'number';
+      c.inputEl.min = '-1';
+      c.setValue(String(s.hoverAfter)).onChange(async (v) => { const n = parseInt(v, 10); s.hoverAfter = Number.isFinite(n) ? Math.max(-1, n) : 20; await save(false); });
+    });
+
+    new Setting(containerEl).setName(t('set.heading.links')).setHeading();
+
+    new Setting(containerEl)
+      .setName(t('set.markStaleLinks.name'))
+      .setDesc(t('set.markStaleLinks.desc'))
+      .addToggle((c) => c.setValue(s.markStaleLinks).onChange(async (v) => { s.markStaleLinks = v; await save(false); }));
 
     const root = this.plugin.codeRoot() || t('set.info.unknownRoot');
     containerEl.createEl('div', { cls: 'setting-item-description', text: t('set.info', { root, entries: plural('entry', this.plugin.index.length) }) });

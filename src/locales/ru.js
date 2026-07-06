@@ -12,13 +12,16 @@ module.exports = {
   'cmd.copyLink': 'Скопировать ссылку на код',
   'cmd.convertSelection': 'Превратить выделение в ссылку на код',
   'cmd.openSelection': 'Найти и открыть код',
+  'cmd.insertEmbed': 'Вставить embed кода',
+  'cmd.updateLinksNote': 'Актуализировать ссылки на код в этой заметке',
+  'cmd.updateLinksVault': 'Актуализировать ссылки на код во всём хранилище',
 
   // Editor context menu
   'menu.convert': 'Найти и превратить в ссылку',
+  'menu.fixLink': 'Актуализировать эту ссылку на код',
 
   // Notices
   'notice.noCodeRoot': 'Code Linker: не удалось определить корень кода',
-  'notice.noScanFolders': 'Code Linker: не заданы папки для сканирования (см. настройки)',
   'notice.noLanguages': 'Code Linker: не включён ни один язык',
   'notice.scanFailed': 'Code Linker: сканирование не удалось — {error}',
   'notice.indexed': 'Code Linker: проиндексировано {entries}',
@@ -28,6 +31,24 @@ module.exports = {
   'notice.noSelection': 'Code Linker: сначала выделите имя или путь',
   'notice.noMatch': 'Code Linker: нет записи кода для «{query}»',
   'notice.watchUnsupported': 'Code Linker: автообновление недоступно на этой платформе — перестраивайте вручную',
+  'notice.linksUpdated': 'Code Linker: обновлено ссылок — {n}',
+  'notice.linksUpdatedVault': 'Code Linker: обновлено ссылок — {n} в заметках: {files}',
+  'notice.langFileNoPath': 'Code Linker: сначала укажите путь к файлу языков',
+  'notice.langFileExists': 'Code Linker: файл языков уже существует',
+  'notice.langFileCreated': 'Code Linker: создан {path}',
+  'notice.langFileError': 'Code Linker: не удалось создать файл — {error}',
+
+  // Inline embeds
+  'embed.empty': 'Code Linker: пустой embed — укажите имя символа или путь:строку',
+  'embed.fmt.symbol': 'Символ — следует за объявлением при движении кода',
+  'embed.fmt.line': 'Строка объявления ({line})',
+  'embed.fmt.range': 'Диапазон строк ({from}-{to}, поправьте по вкусу)',
+  'embed.menu.open': 'Открыть файл кода',
+  'embed.menu.refresh': 'Обновить embed',
+  'embed.notFound': 'Code Linker: нет записи кода для «{query}»',
+  'embed.ambiguous': 'Code Linker: под «{query}» подходит записей: {n} — уточните путём',
+  'embed.unreadable': 'Code Linker: не удалось прочитать {path}',
+  'embed.truncated': 'Code Linker: показаны первые {max} строк',
 
   // Status bar
   'status.indexing': 'Code Linker: индексирование… {n}',
@@ -39,23 +60,26 @@ module.exports = {
   'modal.switchPlaceholder': 'Выберите редактор, в котором открываются ссылки…',
   'modal.formatPlaceholder': 'Выберите формат редактора для этой ссылки…',
   'modal.productPlaceholder': 'Выберите IDE JetBrains…',
+  'modal.embedPlaceholder': 'Выберите формат embed…',
 
   // Settings — headings
   'set.heading.index': 'Индекс кода',
   'set.heading.languages': 'Языки',
   'set.heading.customLanguages': 'Свои языки',
   'set.heading.suggestions': 'Подсказки и ссылки',
+  'set.heading.hover': 'Превью при наведении',
+  'set.heading.links': 'Ссылки',
 
   // Settings — code index
   'set.codeRoot.name': 'Корень кода',
   'set.codeRoot.desc': 'Базовая папка, относительно которой задаются пути сканирования. Пусто = папка, содержащая это хранилище.',
   'set.scanFolders.name': 'Папки сканирования',
-  'set.scanFolders.desc': 'По одному пути в строке, относительно корня кода. Эти папки сканируются на исходные файлы.',
-  'set.scanFolders.notFound': 'Папка не найдена в корне кода.',
+  'set.scanFolders.desc': 'По одному пути в строке, относительно корня кода. Эти папки сканируются на исходные файлы. Оставьте пустым, чтобы сканировать весь корень кода.',
+  'set.scanFolders.notFound': '⚠ Не найдено в корне кода — {folders}',
   'set.maxFileSize.name': 'Макс. размер файла (КБ)',
   'set.maxFileSize.desc': 'Файлы крупнее индексируются только по имени, без разбора объявлений. 0 = без ограничения.',
   'set.skipFolders.name': 'Пропускаемые папки',
-  'set.skipFolders.desc': 'По одному имени папки в строке. В них никогда не заходим.',
+  'set.skipFolders.desc': 'По одной записи в строке. Просто имя (node_modules) пропускается на любой глубине; путь со слэшем (src/generated) пропускает только эту папку относительно корня кода.',
   'set.rebuild.name': 'Перестроить индекс сейчас',
   'set.rebuild.button': 'Перестроить',
 
@@ -70,9 +94,11 @@ module.exports = {
   'set.kind.rebuildHint': 'Перестройте индекс, чтобы выбрать, какие его сущности доступны для поиска.',
 
   // Settings — custom languages
-  'set.customLanguages.desc': 'Добавьте свои языки или переопределите встроенный через JSON-файл в хранилище. Создайте файл по пути ниже, вставьте пример из README, отредактируйте и сохраните — он перезагрузится при сохранении. Запись с id встроенного языка заменяет его; новый id появляется как новый язык выше.',
+  'set.customLanguages.desc': 'Добавьте свои языки или переопределите встроенный через JSON-файл в хранилище. Укажите путь ниже и нажмите «Создать файл», чтобы записать стартовый шаблон, отредактируйте и сохраните — он перезагрузится при сохранении. Запись с id встроенного языка заменяет его; новый id появляется как новый язык выше.',
   'set.languagesFile.name': 'Файл языков',
   'set.languagesFile.desc': 'Путь к JSON-файлу относительно корня хранилища.',
+  'set.languagesFile.create': 'Создать файл',
+  'set.languagesFile.open': 'Открыть файл языков',
   'set.reloadLanguages.name': 'Перезагрузить файл языков',
   'set.reloadLanguages.desc': 'Перечитывает файл и перестраивает индекс. Также происходит автоматически при сохранении файла.',
   'set.reloadLanguages.button': 'Перезагрузить и перестроить',
@@ -107,6 +133,14 @@ module.exports = {
   'set.autoRefresh.unsupported': 'Рекурсивное слежение за папками не поддерживается на этой платформе (Linux); перестраивайте вручную.',
   'set.contextMenu.name': 'Контекстное меню редактора',
   'set.contextMenu.desc': 'Добавлять «Найти и превратить в ссылку» и «Найти и открыть код» в меню по правому клику.',
+  'set.hoverPreview.name': 'Превью кода при наведении',
+  'set.hoverPreview.desc': 'Показывать фрагмент файла вокруг строки ссылки при наведении. В режиме live preview удерживайте Ctrl/Cmd; в режиме чтения достаточно простого наведения.',
+  'set.hoverBefore.name': 'Строк превью до',
+  'set.hoverBefore.desc': 'Сколько строк показывать над целевой строкой. -1 = без ограничения (до начала файла).',
+  'set.hoverAfter.name': 'Строк превью после',
+  'set.hoverAfter.desc': 'Сколько строк показывать под целевой строкой. -1 = без ограничения (до конца файла).',
+  'set.markStaleLinks.name': 'Отмечать устаревшие ссылки',
+  'set.markStaleLinks.desc': 'Подчёркивать ссылки на код, у которых сохранённая строка уехала от объявления (цвет предупреждения) или символ пропал — переименован или удалён (цвет ошибки). Уехавшие чинятся командой «Актуализировать ссылки…».',
   'set.info': 'Корень кода: {root} · проиндексировано {entries}',
   'set.info.unknownRoot': '(неизвестно)',
 

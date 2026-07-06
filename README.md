@@ -27,6 +27,9 @@ The plugin ships as `main.js`, `manifest.json` and `styles.css`. The built-in la
   - [Picker commands](#picker-commands)
   - [Selection commands and the context menu](#selection-commands-and-the-context-menu)
   - [Portable `{root}` links](#portable-root-links)
+  - [Hover preview](#hover-preview)
+  - [Inline embeds](#inline-embeds)
+  - [Keeping links current](#keeping-links-current)
 - [Languages](#languages)
 - [Searchable entities](#searchable-entities)
 - [Settings](#settings)
@@ -89,6 +92,37 @@ Selection-driven commands resolve the selected name or path (or the token under 
 
 `{root}` is **not** expanded when the link is inserted — the note keeps the literal text `{root}`, and the absolute code root is filled in only when the link is rendered (reading view) or opened (live preview). That keeps notes portable: the file on disk holds a relative path, and the machine-specific base comes from your current **Code root** setting. Use it (e.g. `file:///{root}/{path}`) when you don't want absolute paths baked into your notes.
 
+### Hover preview
+
+Hover a code link — in live preview or reading view — to preview the file around the target line, with that line highlighted and Prism syntax colours. The snippet is read straight from disk as a small window (3 lines before, 20 after by default, both configurable), so even a huge file previews instantly; links that don't point at a known code entry just show nothing. Toggle it with **Code preview on hover** in settings; in live preview hold Ctrl/Cmd to show it (like a note preview), while in reading view a plain hover is enough.
+
+### Inline embeds
+
+A fenced `code-link` block renders a snippet of a source file **inline** in the note, so the code lives next to your notes without being copied into them. The first line of the block is the target:
+
+````markdown
+```code-link
+HttpClient
+```
+````
+
+- **A symbol name** (`HttpClient`) is resolved through the index to its declaration and shown with that line highlighted. Because it resolves on every render, it tracks the declaration as the code moves — the embed stays correct without you touching it.
+- **A path with a line range** (`code-samples/http-client.ts:5-20`) shows exactly those lines.
+- **A path with a single line** (`code-samples/http-client.ts:42`) shows that line (add `context: N` to pad it).
+- **A bare path** (`code-samples/http-client.ts`) shows the file from the top (capped).
+
+The command **Insert code embed** picks an entry, then offers the embed formats — by symbol, by declaration line, or a line range — and inserts the block. Optional `key: value` lines after the target tune it: `context: N` (grows the window by N lines on each side — around a symbol, a single line, or a range), `lines: 5-20` (override the range), and `title: …` (header label). The header is clickable and opens the file in your editor; right-click an embed for **Open code file** / **Refresh embed**.
+
+Embeds re-render whenever the index rebuilds, so with **Auto-refresh index** on, an open embed updates after you edit the file on disk. A symbol embed re-resolves its line; a range embed re-reads the file's current contents (the line range itself stays fixed).
+
+### Keeping links current
+
+An inserted link stores the declaration's line at the moment you inserted it. As the code moves, that line drifts. Two things help:
+
+- **Mark stale links** (on by default) underlines code links that need attention, in both reading view and live preview: a **warning-coloured** wavy underline when the stored line has drifted from the declaration, and an **error-coloured** one when the link's file is still indexed but the symbol is gone — renamed or removed (a drift the line-fix can't repair; you update the link text yourself).
+- **Update code links in this note** / **Update code links in the whole vault** re-resolve each link by its symbol name and path and rewrite the drifted line number. Only links that resolve to a single index entry are touched; anything ambiguous or unrelated is left exactly as it was. Links without a line (the `file://` preset) have nothing to update.
+- Right-click a drifted link in the editor and choose **Update this code link** to fix just that one.
+
 ## Languages
 
 All built-in languages are enabled by default. Only **enabled** languages are scanned: their extensions decide which files are read, and their patterns decide which declarations become entries (files always get a top-of-file entry). Built-ins ship for C#, TypeScript, JavaScript, Python, C/C++ and Go; toggle them on/off with the toggles in settings. The built-ins live as [`languages/*.json`](languages) and are bundled into `main.js` at build time.
@@ -97,7 +131,7 @@ All built-in languages are enabled by default. Only **enabled** languages are sc
   <img src="docs/images/languages-1.png" alt="The Languages setting: each language with its file extensions and an enable toggle" width="680">
 </p>
 
-To add or override a language, set **Custom languages → Languages file** to a path in your vault, create that file, and paste the example below as a starting point. Edit and save it — the plugin reloads on save (or click **Reload & rebuild**). An entry whose `id` matches a built-in replaces it.
+To add or override a language, set **Custom languages → Languages file** to a path in your vault and press **Create file** to write a starter template (the example below). Edit and save it — the plugin reloads on save (or click **Reload & rebuild**). An entry whose `id` matches a built-in replaces it.
 
 ```json
 [
@@ -105,6 +139,7 @@ To add or override a language, set **Custom languages → Languages file** to a 
     "id": "rust",
     "name": "Rust",
     "extensions": [".rs"],
+    "prism": "rust",
     "patterns": [
       { "re": "^\\s*(?:pub\\s+)?(struct|enum|trait)\\s+([A-Za-z_]\\w*)", "kindGroup": 1, "nameGroup": 2 },
       { "re": "^\\s*(?:pub\\s+)?fn\\s+([A-Za-z_]\\w*)", "kind": "fn", "nameGroup": 1 }
@@ -114,6 +149,8 @@ To add or override a language, set **Custom languages → Languages file** to a 
 ```
 
 Each pattern uses either `kindGroup` + `nameGroup` (the kind is read from the match) or `kind` (a fixed label) + `nameGroup` (defaults to group 1). `flags` is optional. Remember to double-escape backslashes inside JSON.
+
+The optional `prism` field is the [Prism](https://prismjs.com/#supported-languages) language id used to syntax-highlight this language in the [hover preview](#hover-preview) (e.g. `"rust"`, `"kotlin"`, `"php"`). Without it the preview falls back to a generic c-like highlight. Obsidian loads Prism grammars on demand, so a language is reliably coloured once any code block of it has been rendered in a note.
 
 The languages file is your own trusted config: its patterns are compiled and run as-is, with no safety validation. Anchor them (`^…`) and avoid nested quantifiers so a greedy regex can't bog down indexing. Lines longer than 2000 characters are skipped during parsing.
 
@@ -130,9 +167,9 @@ Each enabled language lists the entity kinds it actually put in the index (e.g. 
 | Setting | What it does |
 | --- | --- |
 | **Code root** | Base folder the scan paths resolve against. Empty = the folder containing the vault. |
-| **Scan folders** | One path per line, relative to the code root. Folders that don't exist are flagged here and in a notice on rebuild. |
+| **Scan folders** | One path per line, relative to the code root. Empty = scan the whole code root. Folders that don't exist are flagged here and in a notice on rebuild. |
 | **Max file size (KB)** | Files larger than this are indexed by name only, not parsed for declarations (`0` = no limit, default 2048). |
-| **Skip folders** | One folder name per line, never descended into (`obj`, `bin`, …). |
+| **Skip folders** | One per line. A bare name (`node_modules`) is skipped at any depth; a path with a slash (`src/generated`) skips only that folder, relative to the code root. |
 | **Trigger** | Text that starts a suggestion (default `@@`). |
 | **Editor link preset** | file:// / VS Code / JetBrains / one of your own editors, or **Always ask** to pick the format on every insert. See [Link targets and URI templates](#link-targets-and-uri-templates). |
 | **JetBrains IDE** | Which JetBrains IDE the JetBrains preset opens (shown when it's selected). |
@@ -140,8 +177,21 @@ Each enabled language lists the entity kinds it actually put in the index (e.g. 
 | **Show editor in status bar** | Show the active preset in the status bar; click it to switch editors without opening settings. |
 | **Auto-refresh index** | Watch the scan folders and rebuild when code changes. Recursive watching isn't supported on Linux — there, rebuild manually (the plugin says so when it can't watch). |
 | **Editor context menu** | Add the **Find and convert to link** and **Find and open code** items to the editor's right-click menu. |
+| **Code preview on hover** | Preview the file around a code link's line on hover (Ctrl/Cmd in live preview). |
+| **Preview lines before / after** | Size of the previewed window around the target line (default 3 / 20). `-1` = no limit (to the start/end of the file). |
+
+**Scan vs. skip folders.** *Scan folders* say where indexing **starts** — specific paths relative to the code root; leave the list empty to scan the whole code root. *Skip folders* then **prune** what's found, and take two forms:
+
+- a **bare name** (`node_modules`, `.git`, `obj`) is skipped wherever it appears, at any depth;
+- a **path with a slash** (`projA/Source`) skips only that one folder, relative to the code root.
+
+So if you have two `Source` folders and want to ignore just one, list `projA/Source` — a bare `Source` would drop both.
 
 The index rebuilds in the background on startup and on demand (command **Code Linker: Rebuild code index**), and — when **Auto-refresh index** is on — automatically when source files change. It is cached to disk, so startup is instant; the background rebuild only re-reads files whose modification time changed.
+
+### Styling
+
+The preview/embed line highlight and the stale/broken underlines (colour, underline style, offset) are exposed to the [Style Settings](https://github.com/mgmeyers/obsidian-style-settings) plugin under a *Code Linker* section, so you can restyle them from a UI. Without Style Settings, or left at default, they follow your theme's colours. Every value is a CSS variable, so you can also override them in a CSS snippet (e.g. `--code-linker-highlight-color`, `--code-linker-stale-color`).
 
 ## Link targets and URI templates
 

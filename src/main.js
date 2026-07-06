@@ -7,7 +7,7 @@
 // The plugin scans the configured folders itself (Node fs, desktop only) and
 // keeps the index in memory — no external build step or index file.
 
-const { Plugin, Notice, normalizePath } = require('obsidian');
+const { Plugin, Notice, normalizePath, MarkdownView } = require('obsidian');
 const { EditorView } = require('@codemirror/view');
 const { Prec } = require('@codemirror/state');
 const fs = require('fs');
@@ -15,13 +15,16 @@ const fsp = fs.promises;
 const readline = require('readline');
 const nodePath = require('path');
 
-const { PRESETS, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, splitLines, inTableCell } = require('./constants');
+const { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, splitLines, parseSkip, underSkip, pathInTarget, inTableCell, inCode, inLink, linkRegex } = require('./constants');
 
 // A declaration line is never this wide; the cap bounds backtracking from a
 // greedy user regex on a minified file so indexing can't hang.
 const MAX_PARSE_LINE_LENGTH = 2000;
 const { BUILTIN_LANGUAGES } = require('./builtin-languages');
 const { CodeIndexSuggest } = require('./suggest');
+const { HoverPreview } = require('./hover');
+const { registerEmbed } = require('./embed');
+const actualize = require('./actualize');
 const { CodeLinkModal, PresetPickerModal } = require('./modal');
 const { CodeLinkerSettingTab } = require('./settings-tab');
 const { initI18n, t, plural } = require('./i18n');
@@ -31,7 +34,7 @@ class CodeLinkerPlugin extends Plugin {
   async onload() {
     initI18n();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    this.index = [];
+    this.setIndex([]);
     this.languages = [];
     this.languageErrors = [];
     this.customRaw = '';
@@ -43,6 +46,7 @@ class CodeLinkerPlugin extends Plugin {
     this.migrateSettings();
     await this.loadCache();
     this.api = this.buildApi(); // app.plugins.plugins['code-linker'].api
+    this.hover = new HoverPreview(this);
 
     this.registerEditorSuggest(new CodeIndexSuggest(this.app, this));
     // Links keep a portable {root} token in the note; the absolute code root is
@@ -64,12 +68,30 @@ class CodeLinkerPlugin extends Plugin {
         })
       )
     );
+    // Inline ```code-link embeds, and the Live Preview underline for drifted links.
+    registerEmbed(this);
+    this.registerEditorExtension(actualize.staleLinksExtension(this));
+    // Re-scan open editors' stale marks when the index rebuilds (embeds re-render via
+    // their own onIndexChange subscription).
+    this.register(this.onIndexChange(() => this.refreshStale()));
+    this.lastX = 0;
+    this.lastY = 0;
+    this.registerDomEvent(document, 'mousemove', (evt) => this.onHoverMove(evt));
+    this.registerDomEvent(document, 'keydown', (evt) => {
+      if (evt.key === 'Control' || evt.key === 'Meta') this.onHoverKey();
+    });
+    // Scrolling inside the popover must not dismiss it; only scrolls elsewhere do.
+    this.registerDomEvent(document, 'scroll', (evt) => {
+      if (!this.hover.contains(evt.target)) this.hover.hide();
+    }, { capture: true });
+    this.registerDomEvent(window, 'blur', () => this.hover.hide());
+    this.registerDomEvent(document, 'keyup', (evt) => { if (evt.key === 'Escape') this.hover.hide(); });
     this.addSettingTab(new CodeLinkerSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
     this.editorStatusEl = this.addStatusBarItem();
     this.editorStatusEl.addClass('mod-clickable');
     this.editorStatusEl.setAttribute('aria-label', t('status.editorTooltip'));
-    this.editorStatusEl.addEventListener('click', () => this.switchPreset());
+    this.registerDomEvent(this.editorStatusEl, 'click', () => this.switchPreset());
     this.updateStatusBar();
     this.addCommand({ id: 'rebuild-code-index', name: t('cmd.rebuildIndex'), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: 'insert-code-link', name: t('cmd.insertLink'), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLink(editor, e, tpl))) });
@@ -79,12 +101,26 @@ class CodeLinkerPlugin extends Plugin {
     this.addCommand({ id: 'copy-code-link', name: t('cmd.copyLink'), callback: () => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.copyLink(e, tpl))) });
     this.addCommand({ id: 'convert-selection-to-link', name: t('cmd.convertSelection'), editorCallback: (editor) => this.convertSelection(editor) });
     this.addCommand({ id: 'open-selected-code', name: t('cmd.openSelection'), editorCallback: (editor) => this.openSelection(editor) });
+    this.addCommand({ id: 'insert-code-embed', name: t('cmd.insertEmbed'), editorCallback: (editor) => this.pickEntry((e) => this.insertEmbed(editor, e)) });
+    this.addCommand({ id: 'update-links-note', name: t('cmd.updateLinksNote'), callback: () => this.updateLinksInActiveNote() });
+    this.addCommand({ id: 'update-links-vault', name: t('cmd.updateLinksVault'), callback: () => this.updateLinksInVault() });
 
     this.registerEvent(
       this.app.workspace.on('editor-menu', (menu, editor) => {
-        if (!this.settings.contextMenu || !this.selectionOrWord(editor)) return;
-        menu.addItem((item) => item.setTitle(t('menu.convert')).setIcon('link').onClick(() => this.convertSelection(editor)));
-        menu.addItem((item) => item.setTitle(t('cmd.openSelection')).setIcon('file-search').onClick(() => this.openSelection(editor)));
+        if (!this.settings.contextMenu) return;
+        // Convert writes a link, so it's offered only where that's safe (not in a link,
+        // code, or frontmatter); open is read-only, so it's offered anywhere but a link.
+        if (this.selectionTarget(editor, true)) {
+          menu.addItem((item) => item.setTitle(t('menu.convert')).setIcon('link').onClick(() => this.convertSelection(editor)));
+        }
+        if (this.selectionTarget(editor, false)) {
+          menu.addItem((item) => item.setTitle(t('cmd.openSelection')).setIcon('file-search').onClick(() => this.openSelection(editor)));
+        }
+        // Right-clicking a drifted code link offers to fix just that link.
+        const link = this.codeLinkAtCursor(editor);
+        if (link && this.isLinkStale(link.name, link.target)) {
+          menu.addItem((item) => item.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fixLinkAtCursor(editor, link)));
+        }
       })
     );
 
@@ -106,6 +142,7 @@ class CodeLinkerPlugin extends Plugin {
   onunload() {
     this.stopWatchers();
     clearTimeout(this.watchTimer);
+    if (this.hover) this.hover.destroy();
   }
 
   migrateSettings() {
@@ -139,6 +176,116 @@ class CodeLinkerPlugin extends Plugin {
         if (out !== v) a.setAttribute(attr, out);
       }
     }
+    this.markStaleAnchors(el);
+  }
+
+  // Toggle the drifted/broken-link underline on every rendered anchor in `el`. toggle (not
+  // add) so re-running after an index rebuild also clears links that are now current.
+  markStaleAnchors(el) {
+    const links = el.querySelectorAll ? el.querySelectorAll('a') : [];
+    for (const a of links) {
+      const state = this.settings.markStaleLinks ? this.linkState(a.textContent, a.getAttribute('href') || '') : null;
+      a.classList.toggle('code-linker-stale', state === 'stale');
+      a.classList.toggle('code-linker-broken', state === 'broken');
+    }
+  }
+
+  // After an index rebuild, refresh stale marks in both render modes: the CM6 effect for
+  // Live Preview, and a re-scan of rendered anchors for Reading view (its post-processor
+  // doesn't re-run on its own).
+  refreshStale() {
+    actualize.refreshStaleLinks(this.app);
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const view = leaf.view;
+      if (view && view.getViewType && view.getViewType() === 'markdown' && view.containerEl) {
+        this.markStaleAnchors(view.containerEl);
+      }
+    });
+  }
+
+  hoverEnabled() {
+    return this.settings.hoverPreview;
+  }
+
+  // Pointer tracking that mirrors a real page preview. Rendered (Reading view) links
+  // preview on plain hover; the editor (Live Preview) needs the modifier — same split
+  // as native page preview. Idle in the editor (nothing shown, no modifier, not over a
+  // rendered link) does no work beyond storing the position. While a preview is up it
+  // follows the pointer so it stays until you leave the link (entering it keeps it).
+  onHoverMove(evt) {
+    this.lastX = evt.clientX;
+    this.lastY = evt.clientY;
+    if (!this.hoverEnabled()) return;
+    if (evt.buttons) return;
+    // evt.target is already the element under the pointer for a mousemove; using it
+    // avoids elementFromPoint's synchronous layout flush on every pointer move.
+    const el = evt.target;
+    if (this.hover.contains(el)) { this.hover.cancelHide(); return; }
+    const mod = evt.ctrlKey || evt.metaKey;
+    // A rendered anchor can preview without the modifier, so we must resolve over one
+    // even when idle; the editor's modifier-gated links don't, so skip the work there.
+    const overAnchor = !!(el && el.closest && el.closest('a'));
+    if (!this.hover.isVisible() && !this.hover.pendingKey && !mod && !overAnchor) return;
+    const hit = this.entryAtPoint(el, evt.clientX, evt.clientY);
+    if (hit && (!hit.requireMod || mod)) {
+      this.hover.cancelHide();
+      this.hover.schedule(hit.entry, evt.clientX, evt.clientY);
+    } else if (this.hover.isVisible() || this.hover.pendingKey) {
+      this.hover.leave();
+    }
+  }
+
+  // Pressing the modifier while already hovering a link shows it — the other order
+  // (modifier first, then move onto the link) is handled by onHoverMove.
+  onHoverKey() {
+    if (!this.hoverEnabled()) return;
+    const el = document.elementFromPoint(this.lastX, this.lastY);
+    if (this.hover.contains(el)) return;
+    const hit = this.entryAtPoint(el, this.lastX, this.lastY);
+    if (hit) this.hover.schedule(hit.entry, this.lastX, this.lastY);
+  }
+
+  // The code entry under a screen point as { entry, requireMod }, across both render
+  // modes, or null. Reading view carries the URL on a rendered anchor and previews on
+  // plain hover; Live Preview's CM6 link span has no href (recovered from the editor at
+  // those coordinates) and requires the modifier, like a link in the editor natively.
+  entryAtPoint(el, x, y) {
+    if (!el || !el.closest) return null;
+    const a = el.closest('a');
+    if (a && !(a.classList && a.classList.contains('internal-link'))) {
+      const entry = this.entryUnderPointer(a.textContent, a.getAttribute('href') || a.getAttribute('data-href') || '');
+      if (entry) return { entry, requireMod: false };
+    }
+    if (el.closest('.cm-link')) {
+      const view = typeof EditorView.findFromDOM === 'function' ? EditorView.findFromDOM(el) : this.activeCm();
+      const ref = view && this.codeRefAt(view, x, y);
+      if (ref) {
+        const entry = this.entryUnderPointer(ref.name, ref.target);
+        if (entry) return { entry, requireMod: true };
+      }
+    }
+    return null;
+  }
+
+  // The CM6 EditorView of the active Markdown editor, used as a fallback when
+  // EditorView.findFromDOM isn't available to map a point to its editor.
+  activeCm() {
+    const mv = this.app.workspace.getActiveViewOfType(MarkdownView);
+    return mv && mv.editor && mv.editor.cm;
+  }
+
+  // Resolve a hovered link's display name + target to an index entry, or null
+  // (so non-code links — a wiki link, a web link, a custom Unity-scene link —
+  // simply show nothing). The entry's relative path must appear in the target,
+  // which every preset embeds via {path}/{abs}; that rejects unrelated links even
+  // when their text matches a symbol name. Ties are broken by the line in the
+  // target, preferring a declaration over the bare file entry.
+  entryUnderPointer(name, target) {
+    if (!name || !target) return null;
+    const { dec, cand } = this.linkCandidates(name, target);
+    if (cand.length <= 1) return cand[0] || null;
+    const onLine = cand.find((e) => new RegExp('[:=]' + e.line + '(?:\\D|$)').test(dec));
+    return onLine || cand.find((e) => e.kind !== 'file') || cand[0];
   }
 
   // CM6 link handler for Live Preview. Suppresses Obsidian's open of the literal
@@ -157,24 +304,31 @@ class CodeLinkerPlugin extends Plugin {
     return true;
   }
 
-  // The markdown link under the click, if it carries a {root} token, resolved. The
-  // rendered span has no href, so map the click to a document position and read it.
-  rootUriAt(evt, view) {
-    const el = evt.target;
-    if (!el || !el.closest || !el.closest('.cm-link')) return null;
+  // The markdown link at screen coords in Live Preview, as { name, target }. The
+  // rendered span has no href, so map the coords to a document position and read it.
+  codeRefAt(view, x, y) {
     if (typeof view.posAtCoords !== 'function') return null;
-    const offset = view.posAtCoords({ x: evt.clientX, y: evt.clientY });
+    const offset = view.posAtCoords({ x, y });
     if (offset == null) return null;
     const line = view.state.doc.lineAt(offset);
     const ch = offset - line.from;
-    const re = /\[[^\]]*\]\(([^)]+)\)/g;
+    const re = linkRegex();
     let m;
     while ((m = re.exec(line.text))) {
       if (ch < m.index || ch > m.index + m[0].length) continue;
-      const tgt = m[1].trim();
-      return /\{root\}|%7Broot%7D/i.test(tgt) ? this.fillRoot(tgt) : null;
+      return { name: m[1], target: m[2].trim() };
     }
     return null;
+  }
+
+  // The link under the click resolved, if it carries a {root} token (else null,
+  // so a plain link falls through to Obsidian's own opener).
+  rootUriAt(evt, view) {
+    const el = evt.target;
+    if (!el || !el.closest || !el.closest('.cm-link')) return null;
+    const ref = this.codeRefAt(view, evt.clientX, evt.clientY);
+    if (!ref) return null;
+    return /\{root\}|%7Broot%7D/i.test(ref.target) ? this.fillRoot(ref.target) : null;
   }
 
   // Absolute base folder the scan paths are resolved against.
@@ -218,7 +372,7 @@ class CodeLinkerPlugin extends Plugin {
       if (!data || data.version !== 1 || !data.files) return;
       this.cacheSignature = data.signature || '';
       this.fileCache = new Map(Object.entries(data.files));
-      this.index = this.flattenCache();
+      this.setIndex(this.flattenCache());
     } catch {
       /* corrupt cache: ignore, the rebuild will repopulate it */
     }
@@ -242,6 +396,61 @@ class CodeLinkerPlugin extends Plugin {
     return out;
   }
 
+  // Set the index and its name lookup together. byName groups entries by lowercased
+  // name so resolving a link/symbol scans only the same-named entries, not the whole
+  // index (the hot paths — hover, stale marks, embeds — call this per event).
+  setIndex(entries) {
+    this.index = entries;
+    this.byName = new Map();
+    for (const e of entries) {
+      const k = e.name.toLowerCase();
+      const a = this.byName.get(k);
+      if (a) a.push(e); else this.byName.set(k, [e]);
+    }
+  }
+
+  // Index entries whose (lowercased) name equals `name` — the candidate set a bare
+  // symbol resolves against.
+  entriesByName(name) {
+    return this.byName.get(String(name).toLowerCase()) || [];
+  }
+
+  // Decode a link target and return { dec, cand }: the decoded string and the entries
+  // whose display name matches and whose path appears in it — the shared first step of
+  // resolving a link. Callers apply their own tie-break (hover uses the stored line,
+  // actualization must not).
+  linkCandidates(name, target) {
+    let dec = this.fillRoot(target);
+    try { dec = decodeURIComponent(dec); } catch { /* malformed escape: match on the raw form */ }
+    dec = dec.split('\\').join('/');
+    const named = this.entriesByName(name).filter((e) => e.name === name && pathInTarget(dec, e.path));
+    // A shorter path can be a boundary-tail of the real one (Foo.cs inside src/Foo.cs);
+    // the longest matching path is the file the link actually points at.
+    const bestLen = named.reduce((mx, e) => Math.max(mx, e.path.length), 0);
+    const cand = named.filter((e) => e.path.length === bestLen);
+    return { dec, cand };
+  }
+
+  // The longest indexed file path a link target points at, or null — lets linkState tell a
+  // broken link (file indexed, symbol gone) from an unrelated one. Only runs for links that
+  // don't resolve, so the file scan stays off the hot path.
+  targetIndexedFile(dec) {
+    let best = null;
+    for (const rel of this.fileCache.keys()) {
+      if ((!best || rel.length > best.length) && pathInTarget(dec, rel)) best = rel;
+    }
+    return best;
+  }
+
+  // The single entry a bare symbol resolves to (a declaration preferred over the file
+  // entry), or null when the name spans several files (ambiguous) or is unknown.
+  uniqueSymbolEntry(name) {
+    const named = this.entriesByName(name);
+    if (!named.length) return null;
+    if (new Set(named.map((e) => e.path)).size > 1) return null;
+    return named.find((e) => e.kind !== 'file') || named[0];
+  }
+
   // Extensions of currently enabled languages, used to filter watch events.
   watchedExts() {
     const enabled = new Set(this.settings.enabledLanguages || []);
@@ -258,11 +467,11 @@ class CodeLinkerPlugin extends Plugin {
     if (!this.settings.autoRefresh) return;
     const root = this.codeRoot();
     if (!root) return;
-    for (const r of splitLines(this.settings.scanRoots)) {
+    for (const r of this.scanFolders()) {
       const dir = nodePath.join(root, r);
       if (!fs.existsSync(dir)) continue;
       try {
-        const w = fs.watch(dir, { recursive: true }, (_evt, filename) => this.onWatchEvent(filename));
+        const w = fs.watch(dir, { recursive: true }, (_evt, filename) => this.onWatchEvent(r, filename));
         this.watchers.push(w);
       } catch (e) {
         // Recursive watching isn't available on Linux — auto-refresh can't work there.
@@ -288,13 +497,14 @@ class CodeLinkerPlugin extends Plugin {
   }
 
   // Debounce a background rebuild on file changes. Skip-dir noise (node_modules)
-  // and files we don't index are dropped cheaply before scheduling.
-  onWatchEvent(filename) {
+  // and files we don't index are dropped cheaply before scheduling. `r` is the scan
+  // root the event came from, so the path can be resolved relative to the code root.
+  onWatchEvent(r, filename) {
     if (filename) {
-      const name = String(filename);
-      const skip = new Set(splitLines(this.settings.skipDirs));
-      if (name.split(/[\\/]/).some((s) => skip.has(s))) return;
-      const ext = nodePath.extname(name).toLowerCase();
+      const base = (r || '').split('\\').join('/').replace(/\/+$/, '');
+      const rel = (base ? base + '/' : '') + String(filename).split('\\').join('/');
+      if (underSkip(rel, parseSkip(this.settings.skipDirs))) return;
+      const ext = nodePath.extname(rel).toLowerCase();
       if (ext && !this.watchedExts().has(ext)) return;
     }
     clearTimeout(this.watchTimer);
@@ -314,6 +524,34 @@ class CodeLinkerPlugin extends Plugin {
       }
     }
     this.compileLanguages();
+  }
+
+  // Write the starter languages file at the configured path (if it doesn't exist yet),
+  // then load and index it. Backs the "Create file" button in settings.
+  async createLanguagesFile() {
+    const path = this.languagesFilePath();
+    if (!path) { new Notice(t('notice.langFileNoPath')); return; }
+    if (this.app.vault.getAbstractFileByPath(path)) { new Notice(t('notice.langFileExists')); return; }
+    try {
+      await this.app.vault.create(path, LANGUAGES_TEMPLATE);
+    } catch (e) {
+      new Notice(t('notice.langFileError', { error: e && e.message }));
+      return;
+    }
+    await this.loadLanguagesFile();
+    await this.rebuildIndex(false);
+    new Notice(t('notice.langFileCreated', { path }));
+  }
+
+  // Open the languages file for editing. It's JSON, which Obsidian can't show in a leaf
+  // (that opens a blank tab), so hand it to the OS default editor.
+  openLanguagesFile() {
+    const path = this.languagesFilePath();
+    if (!path || !this.app.vault.getAbstractFileByPath(path)) return;
+    if (typeof this.app.openWithDefaultApp === 'function') { this.app.openWithDefaultApp(path); return; }
+    const adapter = this.app.vault.adapter;
+    const base = adapter && typeof adapter.getBasePath === 'function' ? adapter.getBasePath() : '';
+    if (base) window.open('file:///' + encodeURI(nodePath.join(base, path).split(nodePath.sep).join('/')));
   }
 
   // Merge built-ins with the languages file, compile every regex.
@@ -359,14 +597,26 @@ class CodeLinkerPlugin extends Plugin {
           this.languageErrors.push({ id: def.id, error: `bad regex: ${e.message}` });
         }
       }
-      out.push({ id: def.id, name: def.name || def.id, extensions, patterns });
+      // Optional: the Prism grammar id used to highlight this language in hover
+      // previews (e.g. "rust"). Built-ins are mapped by PRISM_LANG instead.
+      const prism = typeof def.prism === 'string' ? def.prism.trim() : '';
+      out.push({ id: def.id, name: def.name || def.id, extensions, patterns, prism });
     }
     this.languages = out;
   }
 
+  // The Prism grammar id for a language id: a custom language's own `prism` field
+  // wins, then the built-in mapping, then the id itself (so e.g. "rust" works when
+  // Prism has it). hover.js falls back to plain text / c-like when it doesn't.
+  prismIdFor(langId) {
+    const lang = this.languages.find((l) => l.id === langId);
+    if (lang && lang.prism) return lang.prism;
+    return PRISM_LANG[langId] || langId;
+  }
+
   // Empty the index (nothing to scan) and persist, telling whoever's listening.
   async resetIndex(noticeKey, notify) {
-    this.index = [];
+    this.setIndex([]);
     this.fileCache = new Map();
     await this.saveCache();
     this.notifyIndexChange();
@@ -380,11 +630,7 @@ class CodeLinkerPlugin extends Plugin {
       if (notify) new Notice(t('notice.noCodeRoot'));
       return;
     }
-    const roots = splitLines(this.settings.scanRoots);
-    if (!roots.length) {
-      await this.resetIndex('notice.noScanFolders', notify);
-      return;
-    }
+    const roots = this.scanFolders();
 
     // extension -> [enabled languages that claim it]
     const enabled = new Set(this.settings.enabledLanguages || []);
@@ -408,7 +654,7 @@ class CodeLinkerPlugin extends Plugin {
     // Update the status bar every 200th file, not every file, to spare layout.
     let seen = 0;
     const onFile = () => { if (++seen % 200 === 0) this.statusEl.setText(t('status.indexing', { n: seen })); };
-    const scan = { root, byExt, skip: new Set(splitLines(this.settings.skipDirs)), old, next: new Map(), onFile };
+    const scan = { root, byExt, skip: parseSkip(this.settings.skipDirs), old, next: new Map(), onFile };
     try {
       for (const r of roots) {
         await this.walk(nodePath.join(root, r), scan);
@@ -422,7 +668,7 @@ class CodeLinkerPlugin extends Plugin {
 
     this.fileCache = scan.next;
     this.cacheSignature = signature;
-    this.index = this.flattenCache();
+    this.setIndex(this.flattenCache());
     await this.saveCache();
     this.notifyIndexChange();
     this.startWatchers();
@@ -443,7 +689,8 @@ class CodeLinkerPlugin extends Plugin {
     for (const it of items) {
       const abs = nodePath.join(absDir, it.name);
       if (it.isDirectory()) {
-        if (!scan.skip.has(it.name)) await this.walk(abs, scan);
+        const rel = nodePath.relative(scan.root, abs).split(nodePath.sep).join('/');
+        if (!underSkip(rel, scan.skip)) await this.walk(abs, scan);
       } else if (it.isFile()) {
         const langs = scan.byExt.get(nodePath.extname(it.name).toLowerCase());
         if (langs) await this.indexFile(abs, langs, scan);
@@ -553,6 +800,28 @@ class CodeLinkerPlugin extends Plugin {
     editor.replaceSelection(this.buildLink(e, inTable, template));
   }
 
+  // The ```code-link block bodies offered for an entry: a unique symbol embeds by name
+  // (so it tracks the declaration as code moves), plus precise by-line and by-range forms.
+  // A range shows a window of code; add a `context: N` line by hand to pad the others.
+  embedFormats(e) {
+    const line = e.line || 1;
+    // A symbol embed is safe only when the name resolves to one file (a file + its own
+    // same-named declaration aren't ambiguous — uniqueSymbolEntry handles that).
+    const unique = e.kind !== 'file' && !!this.uniqueSymbolEntry(e.name);
+    const out = [];
+    if (unique) out.push({ label: t('embed.fmt.symbol'), body: e.name });
+    out.push({ label: t('embed.fmt.line', { line }), body: e.path + ':' + line });
+    out.push({ label: t('embed.fmt.range', { from: line, to: line + 10 }), body: e.path + ':' + line + '-' + (line + 10) });
+    return out;
+  }
+
+  insertEmbed(editor, e) {
+    const formats = this.embedFormats(e);
+    new PresetPickerModal(this.app, formats, (f) => {
+      editor.replaceSelection('```code-link\n' + f.body + '\n```\n');
+    }, t('modal.embedPlaceholder')).open();
+  }
+
   // The selectable presets — built-ins then the user's own — as { key, label, template },
   // where key is the value the settings dropdown stores ('u:<i>' for a user editor).
   editorPresets() {
@@ -646,10 +915,48 @@ class CodeLinkerPlugin extends Plugin {
     return text ? { text, from: { line: cur.line, ch: s }, to: { line: cur.line, ch: en } } : null;
   }
 
-  // Run the selected (or under-cursor) token through the index: a single match runs
-  // `action`, several open the picker, none notifies.
-  resolveSelection(editor, action) {
+  // The selection/word to act on, or null when it makes no sense there. Never inside an
+  // existing link (both actions). For `write` (convert-to-link) also never inside code or
+  // frontmatter, where inserting a link would corrupt the sample; opening code from there
+  // is harmless, so read-only actions are allowed.
+  selectionTarget(editor, write) {
     const target = this.selectionOrWord(editor);
+    if (!target) return null;
+    const text = editor.getValue();
+    const off = editor.posToOffset(target.from);
+    if (inLink(text, off)) return null;
+    if (write && inCode(text, off)) return null;
+    return target;
+  }
+
+  // The markdown link spanning the editor cursor, as { name, target, line, from, to }
+  // (character offsets within the line), or null. Right-click puts the cursor on the
+  // click, so this reads the link that was clicked.
+  codeLinkAtCursor(editor) {
+    const cur = editor.getCursor();
+    const line = editor.getLine(cur.line);
+    const re = linkRegex();
+    let m;
+    while ((m = re.exec(line))) {
+      if (cur.ch >= m.index && cur.ch <= m.index + m[0].length) {
+        return { name: m[1], target: m[2], line: cur.line, from: m.index, to: m.index + m[0].length };
+      }
+    }
+    return null;
+  }
+
+  fixLinkAtCursor(editor, link) {
+    const target = this.actualizedTarget(link.name, link.target);
+    if (target == null) { new Notice(t('notice.linksUpdated', { n: 0 })); return; }
+    editor.replaceRange('[' + link.name + '](' + target + ')', { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
+    new Notice(t('notice.linksUpdated', { n: 1 }));
+  }
+
+  // Run the selected (or under-cursor) token through the index: a single match runs
+  // `action`, several open the picker, none notifies. `write` gates the protected-range
+  // check (convert may not run in code; open may).
+  resolveSelection(editor, action, write) {
+    const target = this.selectionTarget(editor, write);
     if (!target) { new Notice(t('notice.noSelection')); return; }
     const matches = this.lookup(target.text);
     if (!matches.length) { new Notice(t('notice.noMatch', { query: target.text })); return; }
@@ -662,16 +969,22 @@ class CodeLinkerPlugin extends Plugin {
     this.resolveSelection(editor, (e, target) => this.withFormat(this.settings.askOnInsert, (template) => {
       const inTable = inTableCell(editor.getValue(), editor.posToOffset(target.from));
       editor.replaceRange(this.buildLink(e, inTable, template), target.from, target.to);
-    }));
+    }), true);
   }
 
   openSelection(editor) {
-    this.resolveSelection(editor, (e) => this.withFormat(this.settings.askOnInsert, (template) => this.openEntry(e, template)));
+    this.resolveSelection(editor, (e) => this.withFormat(this.settings.askOnInsert, (template) => this.openEntry(e, template)), false);
+  }
+
+  // Folders to scan, relative to the code root; empty means the whole code root.
+  scanFolders() {
+    const roots = splitLines(this.settings.scanRoots);
+    return roots.length ? roots : ['.'];
   }
 
   scanRootStatus() {
     const root = this.codeRoot();
-    return splitLines(this.settings.scanRoots).map((rel) => ({
+    return this.scanFolders().map((rel) => ({
       rel,
       exists: !!root && fs.existsSync(nodePath.join(root, rel)),
     }));
@@ -684,5 +997,6 @@ class CodeLinkerPlugin extends Plugin {
 }
 
 Object.assign(CodeLinkerPlugin.prototype, api);
+Object.assign(CodeLinkerPlugin.prototype, actualize.methods);
 
 module.exports = CodeLinkerPlugin;
