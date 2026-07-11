@@ -34,20 +34,12 @@ settings:
     id: code-linker-mark-underline-style
     title: Stale / broken underline style
     type: variable-select
-    default: wavy
+    default: dotted
     options:
-      - wavy
       - dotted
       - dashed
       - solid
       - double
-  -
-    id: code-linker-mark-underline-offset
-    title: Stale / broken underline offset
-    description: Distance between the link text and its underline.
-    type: variable-number
-    default: 3
-    format: px
 
 */
 
@@ -230,15 +222,16 @@ settings:
 }
 .code-linker-embed-error { color: var(--text-error); }
 
-/* Drifted line (stale) and renamed/removed symbol (broken), in both render modes. */
+/* Drifted line (stale) and renamed/removed symbol (broken), in both render modes.
+   A border-bottom rather than text-decoration: wavy/offset underlines render
+   inconsistently across platforms, so a plain border is the reliable choice. */
 .code-linker-stale,
 .code-linker-broken {
-  text-decoration-line: underline;
-  text-decoration-style: var(--code-linker-mark-underline-style, wavy);
-  text-underline-offset: var(--code-linker-mark-underline-offset, 3px);
+  border-bottom-width: 1px;
+  border-bottom-style: var(--code-linker-mark-underline-style, dotted);
 }
-.code-linker-stale { text-decoration-color: var(--code-linker-stale-color, var(--text-warning)); }
-.code-linker-broken { text-decoration-color: var(--code-linker-broken-color, var(--text-error)); }
+.code-linker-stale { border-bottom-color: var(--code-linker-stale-color, var(--text-warning)); }
+.code-linker-broken { border-bottom-color: var(--code-linker-broken-color, var(--text-error)); }
 
 /* Per-language searchable-entity rows, indented under their language toggle. */
 .code-linker-kind-row {

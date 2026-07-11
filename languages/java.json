@@ -1,0 +1,12 @@
+{
+  "id": "java",
+  "name": "Java",
+  "extensions": [".java"],
+  "patterns": [
+    {
+      "re": "^\\s*(?:@[A-Za-z_][\\w.]*(?:\\([^)]*\\))?\\s+)*(?:(?:public|protected|private|abstract|final|static|sealed|non-sealed|strictfp)\\s+)*(class|interface|enum|record)\\s+([A-Za-z_$][\\w$]*)",
+      "kindGroup": 1,
+      "nameGroup": 2
+    }
+  ]
+}

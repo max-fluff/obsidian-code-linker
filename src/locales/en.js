@@ -18,6 +18,7 @@ module.exports = {
 
   // Editor context menu
   'menu.convert': 'Find and convert to link',
+  'menu.copyLink': 'Copy code link',
   'menu.fixLink': 'Update this code link',
 
   // Notices
@@ -132,7 +133,7 @@ module.exports = {
   'set.autoRefresh.desc': 'Watch the scan folders and rebuild the index when source files change.',
   'set.autoRefresh.unsupported': 'Recursive folder watching isn’t supported on this platform (Linux); rebuild manually instead.',
   'set.contextMenu.name': 'Editor context menu',
-  'set.contextMenu.desc': 'Add “Find and convert to link” and “Find and open code” to the editor right-click menu.',
+  'set.contextMenu.desc': 'Add “Find and convert to link” and “Find and open code” to the editor right-click menu — plus “Copy code link” when you right-click a code link.',
   'set.hoverPreview.name': 'Code preview on hover',
   'set.hoverPreview.desc': 'Preview the file around a code link’s line when you hover it. In live preview, hold Ctrl/Cmd; in reading view a plain hover is enough.',
   'set.hoverBefore.name': 'Preview lines before',

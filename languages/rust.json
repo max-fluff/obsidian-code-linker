@@ -1,0 +1,17 @@
+{
+  "id": "rust",
+  "name": "Rust",
+  "extensions": [".rs"],
+  "patterns": [
+    {
+      "re": "^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?(struct|enum|trait|type|union)\\s+([A-Za-z_]\\w*)",
+      "kindGroup": 1,
+      "nameGroup": 2
+    },
+    {
+      "re": "^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?(?:const\\s+|async\\s+|unsafe\\s+|extern\\s+(?:\"[^\"]*\"\\s+)?)*fn\\s+([A-Za-z_]\\w*)",
+      "kind": "fn",
+      "nameGroup": 1
+    }
+  ]
+}

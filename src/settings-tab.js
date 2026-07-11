@@ -47,6 +47,7 @@ class CodeLinkerSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     const s = this.plugin.settings;
+
     // Scanned-content changes pass rebuild=true; query-time tweaks just persist.
     const save = async (rebuild) => { await this.plugin.saveSettings(); if (rebuild) await this.plugin.rebuildIndex(false); };
     const wide = (c) => { c.inputEl.addClass('code-linker-input'); return c; };
@@ -79,6 +80,16 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       c.setValue(String(s.maxFileSizeKb)).onChange(async (v) => { const n = parseInt(v, 10); s.maxFileSizeKb = Number.isFinite(n) && n >= 0 ? n : 2048; await save(false); });
       c.inputEl.addEventListener('blur', () => this.plugin.rebuildIndex(false));
     });
+
+    new Setting(containerEl)
+      .setName(t('set.autoRefresh.name'))
+      .setDesc(t('set.autoRefresh.desc'))
+      .addToggle((c) => c.setValue(s.autoRefresh).onChange(async (v) => { s.autoRefresh = v; await save(false); if (v) this.plugin.startWatchers(); else this.plugin.stopWatchers(); }));
+
+    if (s.autoRefresh && this.plugin.watchUnsupported) {
+      const warn = new Setting(containerEl).setDesc(t('set.autoRefresh.unsupported'));
+      warn.settingEl.addClass('mod-warning');
+    }
 
     new Setting(containerEl)
       .setName(t('set.rebuild.name'))
@@ -154,6 +165,18 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       .setDesc(t('set.trigger.desc'))
       .addText((c) => c.setValue(s.trigger).onChange(async (v) => { s.trigger = v || '@@'; await save(false); }));
 
+    new Setting(containerEl).setName(t('set.minChars.name')).setDesc(t('set.minChars.desc')).addText((c) => {
+      c.inputEl.type = 'number';
+      c.inputEl.min = '0';
+      c.setValue(String(s.minChars)).onChange(async (v) => { const n = parseInt(v, 10); s.minChars = Number.isFinite(n) && n >= 0 ? n : 1; await save(false); });
+    });
+
+    new Setting(containerEl).setName(t('set.maxResults.name')).setDesc(t('set.maxResults.desc')).addText((c) => {
+      c.inputEl.type = 'number';
+      c.inputEl.min = '1';
+      c.setValue(String(s.maxResults)).onChange(async (v) => { const n = parseInt(v, 10); s.maxResults = Number.isFinite(n) && n > 0 ? n : 12; await save(false); });
+    });
+
     new Setting(containerEl)
       .setName(t('set.editorPreset.name'))
       .setDesc(t('set.editorPreset.desc'))
@@ -212,26 +235,6 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       .setName(t('set.statusBar.name'))
       .setDesc(t('set.statusBar.desc'))
       .addToggle((c) => c.setValue(s.showStatusBar).onChange(async (v) => { s.showStatusBar = v; await save(false); }));
-
-    new Setting(containerEl).setName(t('set.minChars.name')).setDesc(t('set.minChars.desc')).addText((c) => {
-      c.inputEl.type = 'number';
-      c.setValue(String(s.minChars)).onChange(async (v) => { const n = parseInt(v, 10); s.minChars = Number.isFinite(n) ? n : 1; await save(false); });
-    });
-
-    new Setting(containerEl).setName(t('set.maxResults.name')).setDesc(t('set.maxResults.desc')).addText((c) => {
-      c.inputEl.type = 'number';
-      c.setValue(String(s.maxResults)).onChange(async (v) => { const n = parseInt(v, 10); s.maxResults = Number.isFinite(n) && n > 0 ? n : 12; await save(false); });
-    });
-
-    new Setting(containerEl)
-      .setName(t('set.autoRefresh.name'))
-      .setDesc(t('set.autoRefresh.desc'))
-      .addToggle((c) => c.setValue(s.autoRefresh).onChange(async (v) => { s.autoRefresh = v; await save(false); if (v) this.plugin.startWatchers(); else this.plugin.stopWatchers(); }));
-
-    if (s.autoRefresh && this.plugin.watchUnsupported) {
-      const warn = new Setting(containerEl).setDesc(t('set.autoRefresh.unsupported'));
-      warn.settingEl.addClass('mod-warning');
-    }
 
     new Setting(containerEl)
       .setName(t('set.contextMenu.name'))

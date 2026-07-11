@@ -1,7 +1,7 @@
 {
   "id": "cpp",
   "name": "C / C++",
-  "extensions": [".h", ".hpp", ".hh", ".cpp", ".cc", ".cxx"],
+  "extensions": [".c", ".h", ".hpp", ".hh", ".cpp", ".cc", ".cxx"],
   "patterns": [
     {
       "re": "^\\s*(?:template\\s*<[^>]*>\\s*)?(class|struct|enum)\\s+([A-Za-z_]\\w*)",

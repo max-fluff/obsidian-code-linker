@@ -1,0 +1,17 @@
+{
+  "id": "php",
+  "name": "PHP",
+  "extensions": [".php"],
+  "patterns": [
+    {
+      "re": "^\\s*(?:(?:abstract|final|readonly)\\s+)*(class|interface|trait|enum)\\s+([A-Za-z_]\\w*)",
+      "kindGroup": 1,
+      "nameGroup": 2
+    },
+    {
+      "re": "^\\s*(?:(?:public|protected|private|static|abstract|final)\\s+)*function\\s+&?\\s*([A-Za-z_]\\w*)",
+      "kind": "function",
+      "nameGroup": 1
+    }
+  ]
+}

@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const readline = require('readline');
+const { loadPrism } = require('obsidian');
 
 const MAX_LINE = 400; // cap line length so a minified file can't blow up the view
 const PRISM_MAX_LINES = 5000; // past this, skip highlighting so it can't freeze the UI
@@ -51,27 +52,34 @@ function renderTokens(parent, tokens) {
   }
 }
 
-// Obsidian loads Prism grammars lazily, so fall back to the generic c-like grammar.
-function prismGrammar(prismId) {
-  const P = (typeof window !== 'undefined' && window.Prism) || (typeof Prism !== 'undefined' ? Prism : null);
+// Obsidian loads Prism (and its grammars) on demand — window.Prism isn't there until
+// something first renders a code block, so hover/embed can't rely on it. loadPrism()
+// resolves the ready instance; cache the promise so we pay the load once.
+let prismPromise = null;
+function ensurePrism() {
+  if (!prismPromise) prismPromise = loadPrism().catch(() => null);
+  return prismPromise;
+}
+
+// Pick the grammar for `prismId`, falling back to the generic c-like one when Prism
+// doesn't bundle that language.
+function prismGrammar(P, prismId) {
   if (!P || !P.languages) return null;
-  const id = prismId && P.languages[prismId] ? prismId : 'clike';
-  const grammar = P.languages[id];
-  return grammar ? { P, id, grammar } : null;
+  return (prismId && P.languages[prismId]) || P.languages.clike || null;
 }
 
 // Append a <pre><code> to `parent` with `text`, syntax-highlighted for `prismId` when a
 // grammar is available and the snippet isn't so large that tokenizing would freeze the UI.
-function renderCode(parent, text, prismId) {
-  const gr = text.split('\n').length <= PRISM_MAX_LINES ? prismGrammar(prismId) : null;
+// The <pre> deliberately carries no `language-*` class: our own .code-linker-code token
+// colours style the snippet, and that class would let a theme paint an opaque code-block
+// background over the highlight band that sits behind the text.
+async function renderCode(parent, text, prismId) {
+  const P = text.split('\n').length <= PRISM_MAX_LINES ? await ensurePrism() : null;
+  const grammar = prismGrammar(P, prismId);
   const pre = parent.createEl('pre');
   const code = pre.createEl('code');
-  if (gr) {
-    pre.addClass('language-' + gr.id);
-    renderTokens(code, gr.P.tokenize(text, gr.grammar));
-  } else {
-    code.setText(text);
-  }
+  if (grammar) renderTokens(code, P.tokenize(text, grammar));
+  else code.setText(text);
 }
 
 module.exports = { readLines, renderCode };

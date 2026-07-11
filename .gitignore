@@ -1,5 +1,4 @@
 node_modules/
-package-lock.json
 test-vault/
 esbuild.local.mjs
 .idea/

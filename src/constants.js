@@ -18,8 +18,11 @@ const PRISM_LANG = {
   typescript: 'typescript',
   javascript: 'javascript',
   python: 'python',
+  java: 'java',
   cpp: 'cpp',
+  php: 'php',
   go: 'go',
+  rust: 'rust',
 };
 
 // JetBrains IDEs offered for the {product} placeholder, as [code, label].
@@ -44,7 +47,7 @@ const DEFAULT_SETTINGS = {
   scanRoots: '', // one path per line, relative to codeRoot
   skipDirs: 'obj\nbin\n.git\nLibrary\nTemp\nnode_modules', // one folder name per line
   editors: [], // user-defined editor presets, each { name, template }
-  askOnInsert: false, // ask which editor format to use on every insert (vs. the fixed preset)
+  askOnInsert: true, // ask which editor format to use on every insert (vs. a fixed preset)
   showStatusBar: false, // show the active editor preset in the status bar, click to switch
   enabledLanguages: null, // null on first run => every built-in enabled
   languagesFile: 'code-languages.json', // vault-relative JSON of extra/override languages
@@ -91,12 +94,13 @@ function underSkip(rel, skip) {
 // with one example (Rust) the user can edit. Matches the format in languages/README.md.
 const LANGUAGES_TEMPLATE = `[
   {
-    "id": "rust",
-    "name": "Rust",
-    "prism": "rust",
-    "extensions": [".rs"],
+    "id": "kotlin",
+    "name": "Kotlin",
+    "prism": "kotlin",
+    "extensions": [".kt", ".kts"],
     "patterns": [
-      { "re": "^\\\\s*(?:pub\\\\s+)?(struct|enum|trait|type|union|fn)\\\\s+([A-Za-z_]\\\\w*)", "kindGroup": 1, "nameGroup": 2 }
+      { "re": "^\\\\s*(?:(?:public|private|internal|open|abstract|sealed|data)\\\\s+)*(class|interface|object)\\\\s+([A-Za-z_]\\\\w*)", "kindGroup": 1, "nameGroup": 2 },
+      { "re": "^\\\\s*(?:(?:public|private|internal|override|suspend|inline)\\\\s+)*fun\\\\s+([A-Za-z_]\\\\w*)", "kind": "fn", "nameGroup": 1 }
     ]
   }
 ]

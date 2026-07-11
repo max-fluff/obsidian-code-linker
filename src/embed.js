@@ -196,7 +196,7 @@ class CodeEmbed extends MarkdownRenderChild {
         band.style.top = 'calc(var(--cl-lh) * ' + idx + ')';
       }
     }
-    renderCode(body, snippet.lines.join('\n'), res.prismId);
+    await renderCode(body, snippet.lines.join('\n'), res.prismId);
     if (res.truncated) el.createDiv({ cls: 'code-linker-embed-note', text: t('embed.truncated', { max: MAX_EMBED_LINES }) });
   }
 }

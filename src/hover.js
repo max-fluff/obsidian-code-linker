@@ -70,7 +70,7 @@ class HoverPreview {
     const band = body.createDiv({ cls: 'code-linker-hover-band' });
     band.style.top = 'calc(var(--cl-lh) * ' + idx + ')';
 
-    renderCode(body, snippet.lines.join('\n'), this.plugin.prismIdFor(entry.lang));
+    await renderCode(body, snippet.lines.join('\n'), this.plugin.prismIdFor(entry.lang));
 
     // Reveal (display via CSS class) but keep it invisible and off-screen while we
     // measure, then place near the cursor, flipping when it would overflow. The final

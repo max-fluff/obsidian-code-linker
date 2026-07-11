@@ -12,8 +12,11 @@ const BUILTIN_LANGUAGES = [
   require('../languages/typescript.json'),
   require('../languages/javascript.json'),
   require('../languages/python.json'),
+  require('../languages/java.json'),
   require('../languages/cpp.json'),
+  require('../languages/php.json'),
   require('../languages/go.json'),
+  require('../languages/rust.json'),
 ];
 
 module.exports = { BUILTIN_LANGUAGES };

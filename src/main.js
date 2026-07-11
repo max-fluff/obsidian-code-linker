@@ -116,10 +116,14 @@ class CodeLinkerPlugin extends Plugin {
         if (this.selectionTarget(editor, false)) {
           menu.addItem((item) => item.setTitle(t('cmd.openSelection')).setIcon('file-search').onClick(() => this.openSelection(editor)));
         }
-        // Right-clicking a drifted code link offers to fix just that link.
+        // Right-clicking one of our code links: copy its resolved target, and — if the
+        // stored line has drifted — offer to fix just that link.
         const link = this.codeLinkAtCursor(editor);
-        if (link && this.isLinkStale(link.name, link.target)) {
-          menu.addItem((item) => item.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fixLinkAtCursor(editor, link)));
+        if (link && this.isCodeLink(link.name, link.target)) {
+          menu.addItem((item) => item.setTitle(t('menu.copyLink')).setIcon('copy').onClick(() => this.copyLinkAtCursor(link)));
+          if (this.isLinkStale(link.name, link.target)) {
+            menu.addItem((item) => item.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fixLinkAtCursor(editor, link)));
+          }
         }
       })
     );
@@ -878,8 +882,11 @@ class CodeLinkerPlugin extends Plugin {
     });
   }
 
+  // Resolve {root} to the absolute code root: a copied link is usually pasted outside
+  // the vault (a browser, a terminal), where the portable {root} token wouldn't resolve.
+  // Inserted links keep {root} for note portability.
   copyLink(e, template) {
-    navigator.clipboard.writeText(this.buildLink(e, false, template));
+    navigator.clipboard.writeText(this.fillRoot(this.buildLink(e, false, template)));
     new Notice(t('notice.copied'));
   }
 
@@ -950,6 +957,20 @@ class CodeLinkerPlugin extends Plugin {
     if (target == null) { new Notice(t('notice.linksUpdated', { n: 0 })); return; }
     editor.replaceRange('[' + link.name + '](' + target + ')', { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
     new Notice(t('notice.linksUpdated', { n: 1 }));
+  }
+
+  // Whether a markdown link is one of ours (points at indexed code) rather than a wiki
+  // or web link — true for current, drifted and broken code links alike, so the
+  // right-click copy/fix items only show on links this plugin owns.
+  isCodeLink(name, target) {
+    return !!this.entryUnderPointer(name, target) || !!this.linkState(name, target);
+  }
+
+  // Copy the clicked link's own target ({root} filled in), keeping the scheme it was
+  // saved with — unlike copyLink, which builds a fresh link from the default preset.
+  copyLinkAtCursor(link) {
+    navigator.clipboard.writeText(this.fillRoot(link.target));
+    new Notice(t('notice.copied'));
   }
 
   // Run the selected (or under-cursor) token through the index: a single match runs

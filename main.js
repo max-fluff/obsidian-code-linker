@@ -24,8 +24,11 @@ var require_constants = __commonJS({
       typescript: "typescript",
       javascript: "javascript",
       python: "python",
+      java: "java",
       cpp: "cpp",
-      go: "go"
+      php: "php",
+      go: "go",
+      rust: "rust"
     };
     var JETBRAINS_PRODUCTS2 = [
       ["idea", "IntelliJ IDEA"],
@@ -52,8 +55,8 @@ var require_constants = __commonJS({
       // one folder name per line
       editors: [],
       // user-defined editor presets, each { name, template }
-      askOnInsert: false,
-      // ask which editor format to use on every insert (vs. the fixed preset)
+      askOnInsert: true,
+      // ask which editor format to use on every insert (vs. a fixed preset)
       showStatusBar: false,
       // show the active editor preset in the status bar, click to switch
       enabledLanguages: null,
@@ -111,12 +114,13 @@ var require_constants = __commonJS({
     }
     var LANGUAGES_TEMPLATE2 = `[
   {
-    "id": "rust",
-    "name": "Rust",
-    "prism": "rust",
-    "extensions": [".rs"],
+    "id": "kotlin",
+    "name": "Kotlin",
+    "prism": "kotlin",
+    "extensions": [".kt", ".kts"],
     "patterns": [
-      { "re": "^\\\\s*(?:pub\\\\s+)?(struct|enum|trait|type|union|fn)\\\\s+([A-Za-z_]\\\\w*)", "kindGroup": 1, "nameGroup": 2 }
+      { "re": "^\\\\s*(?:(?:public|private|internal|open|abstract|sealed|data)\\\\s+)*(class|interface|object)\\\\s+([A-Za-z_]\\\\w*)", "kindGroup": 1, "nameGroup": 2 },
+      { "re": "^\\\\s*(?:(?:public|private|internal|override|suspend|inline)\\\\s+)*fun\\\\s+([A-Za-z_]\\\\w*)", "kind": "fn", "nameGroup": 1 }
     ]
   }
 ]
@@ -278,18 +282,59 @@ var require_python = __commonJS({
   }
 });
 
+// languages/java.json
+var require_java = __commonJS({
+  "languages/java.json"(exports2, module2) {
+    module2.exports = {
+      id: "java",
+      name: "Java",
+      extensions: [".java"],
+      patterns: [
+        {
+          re: "^\\s*(?:@[A-Za-z_][\\w.]*(?:\\([^)]*\\))?\\s+)*(?:(?:public|protected|private|abstract|final|static|sealed|non-sealed|strictfp)\\s+)*(class|interface|enum|record)\\s+([A-Za-z_$][\\w$]*)",
+          kindGroup: 1,
+          nameGroup: 2
+        }
+      ]
+    };
+  }
+});
+
 // languages/cpp.json
 var require_cpp = __commonJS({
   "languages/cpp.json"(exports2, module2) {
     module2.exports = {
       id: "cpp",
       name: "C / C++",
-      extensions: [".h", ".hpp", ".hh", ".cpp", ".cc", ".cxx"],
+      extensions: [".c", ".h", ".hpp", ".hh", ".cpp", ".cc", ".cxx"],
       patterns: [
         {
           re: "^\\s*(?:template\\s*<[^>]*>\\s*)?(class|struct|enum)\\s+([A-Za-z_]\\w*)",
           kindGroup: 1,
           nameGroup: 2
+        }
+      ]
+    };
+  }
+});
+
+// languages/php.json
+var require_php = __commonJS({
+  "languages/php.json"(exports2, module2) {
+    module2.exports = {
+      id: "php",
+      name: "PHP",
+      extensions: [".php"],
+      patterns: [
+        {
+          re: "^\\s*(?:(?:abstract|final|readonly)\\s+)*(class|interface|trait|enum)\\s+([A-Za-z_]\\w*)",
+          kindGroup: 1,
+          nameGroup: 2
+        },
+        {
+          re: "^\\s*(?:(?:public|protected|private|static|abstract|final)\\s+)*function\\s+&?\\s*([A-Za-z_]\\w*)",
+          kind: "function",
+          nameGroup: 1
         }
       ]
     };
@@ -311,6 +356,29 @@ var require_go = __commonJS({
   }
 });
 
+// languages/rust.json
+var require_rust = __commonJS({
+  "languages/rust.json"(exports2, module2) {
+    module2.exports = {
+      id: "rust",
+      name: "Rust",
+      extensions: [".rs"],
+      patterns: [
+        {
+          re: "^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?(struct|enum|trait|type|union)\\s+([A-Za-z_]\\w*)",
+          kindGroup: 1,
+          nameGroup: 2
+        },
+        {
+          re: '^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?(?:const\\s+|async\\s+|unsafe\\s+|extern\\s+(?:"[^"]*"\\s+)?)*fn\\s+([A-Za-z_]\\w*)',
+          kind: "fn",
+          nameGroup: 1
+        }
+      ]
+    };
+  }
+});
+
 // src/builtin-languages.js
 var require_builtin_languages = __commonJS({
   "src/builtin-languages.js"(exports2, module2) {
@@ -320,8 +388,11 @@ var require_builtin_languages = __commonJS({
       require_typescript(),
       require_javascript(),
       require_python(),
+      require_java(),
       require_cpp(),
-      require_go()
+      require_php(),
+      require_go(),
+      require_rust()
     ];
     module2.exports = { BUILTIN_LANGUAGES: BUILTIN_LANGUAGES2 };
   }
@@ -413,6 +484,7 @@ var require_render = __commonJS({
     "use strict";
     var fs2 = require("fs");
     var readline2 = require("readline");
+    var { loadPrism } = require("obsidian");
     var MAX_LINE = 400;
     var PRISM_MAX_LINES = 5e3;
     function readLines(absPath, from, to) {
@@ -470,24 +542,26 @@ var require_render = __commonJS({
           renderTokens(span, Array.isArray(tok.content) ? tok.content : [tok.content]);
       }
     }
-    function prismGrammar(prismId) {
-      const P = typeof window !== "undefined" && window.Prism || (typeof Prism !== "undefined" ? Prism : null);
+    var prismPromise = null;
+    function ensurePrism() {
+      if (!prismPromise)
+        prismPromise = loadPrism().catch(() => null);
+      return prismPromise;
+    }
+    function prismGrammar(P, prismId) {
       if (!P || !P.languages)
         return null;
-      const id = prismId && P.languages[prismId] ? prismId : "clike";
-      const grammar = P.languages[id];
-      return grammar ? { P, id, grammar } : null;
+      return prismId && P.languages[prismId] || P.languages.clike || null;
     }
-    function renderCode(parent, text, prismId) {
-      const gr = text.split("\n").length <= PRISM_MAX_LINES ? prismGrammar(prismId) : null;
+    async function renderCode(parent, text, prismId) {
+      const P = text.split("\n").length <= PRISM_MAX_LINES ? await ensurePrism() : null;
+      const grammar = prismGrammar(P, prismId);
       const pre = parent.createEl("pre");
       const code = pre.createEl("code");
-      if (gr) {
-        pre.addClass("language-" + gr.id);
-        renderTokens(code, gr.P.tokenize(text, gr.grammar));
-      } else {
+      if (grammar)
+        renderTokens(code, P.tokenize(text, grammar));
+      else
         code.setText(text);
-      }
     }
     module2.exports = { readLines, renderCode };
   }
@@ -566,7 +640,7 @@ var require_hover = __commonJS({
         const idx = Math.min(Math.max(0, line - snippet.startLine), snippet.lines.length - 1);
         const band = body.createDiv({ cls: "code-linker-hover-band" });
         band.style.top = "calc(var(--cl-lh) * " + idx + ")";
-        renderCode(body, snippet.lines.join("\n"), this.plugin.prismIdFor(entry.lang));
+        await renderCode(body, snippet.lines.join("\n"), this.plugin.prismIdFor(entry.lang));
         el.style.visibility = "hidden";
         el.style.left = "-9999px";
         el.style.top = "0px";
@@ -627,6 +701,7 @@ var require_en = __commonJS({
       "cmd.updateLinksVault": "Update code links in the whole vault",
       // Editor context menu
       "menu.convert": "Find and convert to link",
+      "menu.copyLink": "Copy code link",
       "menu.fixLink": "Update this code link",
       // Notices
       "notice.noCodeRoot": "Code Linker: could not determine code root",
@@ -732,7 +807,7 @@ var require_en = __commonJS({
       "set.autoRefresh.desc": "Watch the scan folders and rebuild the index when source files change.",
       "set.autoRefresh.unsupported": "Recursive folder watching isn\u2019t supported on this platform (Linux); rebuild manually instead.",
       "set.contextMenu.name": "Editor context menu",
-      "set.contextMenu.desc": "Add \u201CFind and convert to link\u201D and \u201CFind and open code\u201D to the editor right-click menu.",
+      "set.contextMenu.desc": "Add \u201CFind and convert to link\u201D and \u201CFind and open code\u201D to the editor right-click menu \u2014 plus \u201CCopy code link\u201D when you right-click a code link.",
       "set.hoverPreview.name": "Code preview on hover",
       "set.hoverPreview.desc": "Preview the file around a code link\u2019s line when you hover it. In live preview, hold Ctrl/Cmd; in reading view a plain hover is enough.",
       "set.hoverBefore.name": "Preview lines before",
@@ -768,6 +843,7 @@ var require_ru = __commonJS({
       "cmd.updateLinksVault": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u043A\u043E\u0434 \u0432\u043E \u0432\u0441\u0451\u043C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
       // Editor context menu
       "menu.convert": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
+      "menu.copyLink": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
       "menu.fixLink": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
       // Notices
       "notice.noCodeRoot": "Code Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u044C \u043A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430",
@@ -873,7 +949,7 @@ var require_ru = __commonJS({
       "set.autoRefresh.desc": "\u0421\u043B\u0435\u0434\u0438\u0442\u044C \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0440\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0438\u0441\u0445\u043E\u0434\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432.",
       "set.autoRefresh.unsupported": "\u0420\u0435\u043A\u0443\u0440\u0441\u0438\u0432\u043D\u043E\u0435 \u0441\u043B\u0435\u0436\u0435\u043D\u0438\u0435 \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u043D\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 (Linux); \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E.",
       "set.contextMenu.name": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430",
-      "set.contextMenu.desc": "\u0414\u043E\u0431\u0430\u0432\u043B\u044F\u0442\u044C \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443\xBB \u0438 \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434\xBB \u0432 \u043C\u0435\u043D\u044E \u043F\u043E \u043F\u0440\u0430\u0432\u043E\u043C\u0443 \u043A\u043B\u0438\u043A\u0443.",
+      "set.contextMenu.desc": "\u0414\u043E\u0431\u0430\u0432\u043B\u044F\u0442\u044C \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443\xBB \u0438 \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434\xBB \u0432 \u043C\u0435\u043D\u044E \u043F\u043E \u043F\u0440\u0430\u0432\u043E\u043C\u0443 \u043A\u043B\u0438\u043A\u0443 \u2014 \u043F\u043B\u044E\u0441 \xAB\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434\xBB \u043F\u0440\u0438 \u043A\u043B\u0438\u043A\u0435 \u043F\u043E \u0441\u0441\u044B\u043B\u043A\u0435 \u0432 \u043A\u043E\u0434.",
       "set.hoverPreview.name": "\u041F\u0440\u0435\u0432\u044C\u044E \u043A\u043E\u0434\u0430 \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438",
       "set.hoverPreview.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442 \u0444\u0430\u0439\u043B\u0430 \u0432\u043E\u043A\u0440\u0443\u0433 \u0441\u0442\u0440\u043E\u043A\u0438 \u0441\u0441\u044B\u043B\u043A\u0438 \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438. \u0412 \u0440\u0435\u0436\u0438\u043C\u0435 live preview \u0443\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0439\u0442\u0435 Ctrl/Cmd; \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u0447\u0442\u0435\u043D\u0438\u044F \u0434\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E \u043F\u0440\u043E\u0441\u0442\u043E\u0433\u043E \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u044F.",
       "set.hoverBefore.name": "\u0421\u0442\u0440\u043E\u043A \u043F\u0440\u0435\u0432\u044C\u044E \u0434\u043E",
@@ -1128,7 +1204,7 @@ var require_embed = __commonJS({
             band.style.top = "calc(var(--cl-lh) * " + idx + ")";
           }
         }
-        renderCode(body, snippet.lines.join("\n"), res.prismId);
+        await renderCode(body, snippet.lines.join("\n"), res.prismId);
         if (res.truncated)
           el.createDiv({ cls: "code-linker-embed-note", text: t2("embed.truncated", { max: MAX_EMBED_LINES }) });
       }
@@ -1467,6 +1543,18 @@ var require_settings_tab = __commonJS({
           });
           c.inputEl.addEventListener("blur", () => this.plugin.rebuildIndex(false));
         });
+        new Setting(containerEl).setName(t2("set.autoRefresh.name")).setDesc(t2("set.autoRefresh.desc")).addToggle((c) => c.setValue(s.autoRefresh).onChange(async (v) => {
+          s.autoRefresh = v;
+          await save(false);
+          if (v)
+            this.plugin.startWatchers();
+          else
+            this.plugin.stopWatchers();
+        }));
+        if (s.autoRefresh && this.plugin.watchUnsupported) {
+          const warn = new Setting(containerEl).setDesc(t2("set.autoRefresh.unsupported"));
+          warn.settingEl.addClass("mod-warning");
+        }
         new Setting(containerEl).setName(t2("set.rebuild.name")).addButton((b) => b.setButtonText(t2("set.rebuild.button")).onClick(() => this.plugin.rebuildIndex(true).then(() => this.display())));
         new Setting(containerEl).setName(t2("set.heading.languages")).setHeading();
         const enabled = new Set(s.enabledLanguages || []);
@@ -1534,6 +1622,24 @@ var require_settings_tab = __commonJS({
           s.trigger = v || "@@";
           await save(false);
         }));
+        new Setting(containerEl).setName(t2("set.minChars.name")).setDesc(t2("set.minChars.desc")).addText((c) => {
+          c.inputEl.type = "number";
+          c.inputEl.min = "0";
+          c.setValue(String(s.minChars)).onChange(async (v) => {
+            const n = parseInt(v, 10);
+            s.minChars = Number.isFinite(n) && n >= 0 ? n : 1;
+            await save(false);
+          });
+        });
+        new Setting(containerEl).setName(t2("set.maxResults.name")).setDesc(t2("set.maxResults.desc")).addText((c) => {
+          c.inputEl.type = "number";
+          c.inputEl.min = "1";
+          c.setValue(String(s.maxResults)).onChange(async (v) => {
+            const n = parseInt(v, 10);
+            s.maxResults = Number.isFinite(n) && n > 0 ? n : 12;
+            await save(false);
+          });
+        });
         new Setting(containerEl).setName(t2("set.editorPreset.name")).setDesc(t2("set.editorPreset.desc")).addDropdown((d) => {
           for (const p of this.plugin.editorPresets())
             d.addOption(p.key, p.label);
@@ -1604,34 +1710,6 @@ var require_settings_tab = __commonJS({
           s.showStatusBar = v;
           await save(false);
         }));
-        new Setting(containerEl).setName(t2("set.minChars.name")).setDesc(t2("set.minChars.desc")).addText((c) => {
-          c.inputEl.type = "number";
-          c.setValue(String(s.minChars)).onChange(async (v) => {
-            const n = parseInt(v, 10);
-            s.minChars = Number.isFinite(n) ? n : 1;
-            await save(false);
-          });
-        });
-        new Setting(containerEl).setName(t2("set.maxResults.name")).setDesc(t2("set.maxResults.desc")).addText((c) => {
-          c.inputEl.type = "number";
-          c.setValue(String(s.maxResults)).onChange(async (v) => {
-            const n = parseInt(v, 10);
-            s.maxResults = Number.isFinite(n) && n > 0 ? n : 12;
-            await save(false);
-          });
-        });
-        new Setting(containerEl).setName(t2("set.autoRefresh.name")).setDesc(t2("set.autoRefresh.desc")).addToggle((c) => c.setValue(s.autoRefresh).onChange(async (v) => {
-          s.autoRefresh = v;
-          await save(false);
-          if (v)
-            this.plugin.startWatchers();
-          else
-            this.plugin.stopWatchers();
-        }));
-        if (s.autoRefresh && this.plugin.watchUnsupported) {
-          const warn = new Setting(containerEl).setDesc(t2("set.autoRefresh.unsupported"));
-          warn.settingEl.addClass("mod-warning");
-        }
         new Setting(containerEl).setName(t2("set.contextMenu.name")).setDesc(t2("set.contextMenu.desc")).addToggle((c) => c.setValue(s.contextMenu).onChange(async (v) => {
           s.contextMenu = v;
           await save(false);
@@ -1837,8 +1915,11 @@ var CodeLinkerPlugin = class extends Plugin {
           menu.addItem((item) => item.setTitle(t("cmd.openSelection")).setIcon("file-search").onClick(() => this.openSelection(editor)));
         }
         const link = this.codeLinkAtCursor(editor);
-        if (link && this.isLinkStale(link.name, link.target)) {
-          menu.addItem((item) => item.setTitle(t("menu.fixLink")).setIcon("wrench").onClick(() => this.fixLinkAtCursor(editor, link)));
+        if (link && this.isCodeLink(link.name, link.target)) {
+          menu.addItem((item) => item.setTitle(t("menu.copyLink")).setIcon("copy").onClick(() => this.copyLinkAtCursor(link)));
+          if (this.isLinkStale(link.name, link.target)) {
+            menu.addItem((item) => item.setTitle(t("menu.fixLink")).setIcon("wrench").onClick(() => this.fixLinkAtCursor(editor, link)));
+          }
         }
       })
     );
@@ -2579,8 +2660,11 @@ var CodeLinkerPlugin = class extends Plugin {
       new Notice(t("notice.editorSet", { name: ide ? ide.label : p.label }));
     });
   }
+  // Resolve {root} to the absolute code root: a copied link is usually pasted outside
+  // the vault (a browser, a terminal), where the portable {root} token wouldn't resolve.
+  // Inserted links keep {root} for note portability.
   copyLink(e, template) {
-    navigator.clipboard.writeText(this.buildLink(e, false, template));
+    navigator.clipboard.writeText(this.fillRoot(this.buildLink(e, false, template)));
     new Notice(t("notice.copied"));
   }
   // fillRoot resolves the portable {root} token, since there's no note to render it.
@@ -2656,6 +2740,18 @@ var CodeLinkerPlugin = class extends Plugin {
     }
     editor.replaceRange("[" + link.name + "](" + target + ")", { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
     new Notice(t("notice.linksUpdated", { n: 1 }));
+  }
+  // Whether a markdown link is one of ours (points at indexed code) rather than a wiki
+  // or web link — true for current, drifted and broken code links alike, so the
+  // right-click copy/fix items only show on links this plugin owns.
+  isCodeLink(name, target) {
+    return !!this.entryUnderPointer(name, target) || !!this.linkState(name, target);
+  }
+  // Copy the clicked link's own target ({root} filled in), keeping the scheme it was
+  // saved with — unlike copyLink, which builds a fresh link from the default preset.
+  copyLinkAtCursor(link) {
+    navigator.clipboard.writeText(this.fillRoot(link.target));
+    new Notice(t("notice.copied"));
   }
   // Run the selected (or under-cursor) token through the index: a single match runs
   // `action`, several open the picker, none notifies. `write` gates the protected-range
