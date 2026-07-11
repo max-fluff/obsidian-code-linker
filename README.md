@@ -288,10 +288,10 @@ Requires Obsidian 1.4.0 or newer. Desktop-only — the index is built by reading
 
 ## Related plugins
 
-Also by the author — **[Glossary Linker](https://github.com/max-fluff/obsidian-glossary-linker)**: highlights glossary terms in any word form, turns them into real links, and learns new aliases from links you've already made. Works on desktop and mobile.
+Also by the author — **[Glossary Linker](https://community.obsidian.md/plugins/glossary-linker)**: highlights glossary terms in any word form, turns them into real links, and learns new aliases from links you've already made. Works on desktop and mobile.
 
 <p align="center">
-  <a href="https://github.com/max-fluff/obsidian-glossary-linker">
+  <a href="https://community.obsidian.md/plugins/glossary-linker">
     <img src="docs/images/glossary-linker-banner.svg" alt="Glossary Linker — highlight terms in any word form, then link them" width="480">
   </a>
 </p>
