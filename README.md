@@ -98,6 +98,10 @@ Right-clicking an existing code link (rather than a plain selection) adds link-s
 
 Hover a code link — in live preview or reading view — to preview the file around the target line, with that line highlighted and Prism syntax colours. The snippet is read straight from disk as a small window (3 lines before, 20 after by default, both configurable), so even a huge file previews instantly; links that don't point at a known code entry just show nothing. Toggle it with **Code preview on hover** in settings; in live preview hold Ctrl/Cmd to show it (like a note preview), while in reading view a plain hover is enough.
 
+<p align="center">
+  <img src="docs/images/hover.png" alt="The hover preview popover over a code link, showing the source around the target line with that line highlighted" width="560">
+</p>
+
 ### Inline embeds
 
 A fenced `code-link` block renders a snippet of a source file **inline** in the note, so the code lives next to your notes without being copied into them. The first line of the block is the target:
@@ -107,6 +111,10 @@ A fenced `code-link` block renders a snippet of a source file **inline** in the 
 HttpClient
 ```
 ````
+
+<p align="center">
+  <img src="docs/images/embed.png" alt="Two rendered code-link embeds: a symbol resolved to its declaration with the line highlighted, and a titled line range" width="640">
+</p>
 
 - **A symbol name** (`HttpClient`) is resolved through the index to its declaration and shown with that line highlighted. Because it resolves on every render, it tracks the declaration as the code moves — the embed stays correct without you touching it.
 - **A path with a line range** (`code-samples/http-client.ts:5-20`) shows exactly those lines.
