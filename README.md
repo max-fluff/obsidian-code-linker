@@ -4,7 +4,15 @@
 
 # Code Linker
 
+<p align="center">
+  <a href="https://community.obsidian.md/plugins/code-linker"><img src="https://img.shields.io/badge/dynamic/json?logo=obsidian&color=7c3aed&query=%24%5B%22code-linker%22%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json&label=downloads" alt="Obsidian downloads"></a>
+  <a href="https://github.com/max-fluff/obsidian-code-linker/releases/latest"><img src="https://img.shields.io/github/v/release/max-fluff/obsidian-code-linker?sort=semver&color=7c3aed&label=release" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/max-fluff/obsidian-code-linker?color=7c3aed" alt="License: MIT"></a>
+</p>
+
 An Obsidian plugin that autocompletes references to your **source code** and inserts a markdown link whose URL opens the file at the right line in your editor (VS Code, Rider, …).
+
+Available in the Obsidian community catalog: **[community.obsidian.md/plugins/code-linker](https://community.obsidian.md/plugins/code-linker)**.
 
 <p align="center">
   <img src="docs/images/hero.png" alt="A note with a code reference autocompleted and turned into a deep-link" width="700">
@@ -32,9 +40,11 @@ The plugin ships as `main.js`, `manifest.json` and `styles.css`. The built-in la
   - [Keeping links current](#keeping-links-current)
 - [Languages](#languages)
 - [Searchable entities](#searchable-entities)
+- [Commands](#commands-command-palette-ctrlp)
 - [Settings](#settings)
 - [Link targets and URI templates](#link-targets-and-uri-templates)
 - [Skipped contexts](#skipped-contexts)
+- [Performance](#performance)
 - [Public API](#public-api)
 - [Development](#development)
 - [Installation](#installation)
@@ -172,26 +182,57 @@ Each enabled language lists the entity kinds it actually put in the index (e.g. 
   <img src="docs/images/languages-2.png" alt="A language expanded to show its entity kinds, each with a count and an enable toggle" width="680">
 </p>
 
+## Commands (command palette, Ctrl+P)
+
+- **Insert code link** — insert a link at the cursor.
+- **Insert code link as…** — insert one link with a one-off editor choice, leaving the default alone.
+- **Open code file** — open the picked file without inserting.
+- **Copy code link** — copy a link with `{root}` resolved to the absolute path (copied links usually land outside the vault).
+- **Insert code embed** — insert a `code-link` block, choosing the format (by symbol, declaration line, or line range).
+- **Convert selection to code link** / **Find and open code** — resolve the selection against the index, then convert it or open the file (one match acts directly, several open the picker).
+- **Switch editor preset** — change the default editor without opening settings.
+- **Update code links in this note** / **Update code links in the whole vault** — rewrite drifted line numbers (see [Keeping links current](#keeping-links-current)).
+- **Rebuild code index**.
+
+The selection commands and the link actions are also in the editor's right-click menu — see [Selection commands and the context menu](#selection-commands-and-the-context-menu).
+
 ## Settings
 
-| Setting | What it does |
-| --- | --- |
-| **Code root** | Base folder the scan paths resolve against. Empty = the folder containing the vault. |
-| **Scan folders** | One path per line, relative to the code root. Empty = scan the whole code root. Folders that don't exist are flagged here and in a notice on rebuild. |
-| **Max file size (KB)** | Files larger than this are indexed by name only, not parsed for declarations (`0` = no limit, default 2048). |
-| **Skip folders** | One per line. A bare name (`node_modules`) is skipped at any depth; a path with a slash (`src/generated`) skips only that folder, relative to the code root. |
-| **Auto-refresh index** | Watch the scan folders and rebuild when code changes. Recursive watching isn't supported on Linux — there, rebuild manually (the plugin says so when it can't watch). |
-| **Trigger** | Text that starts a suggestion (default `@@`). |
-| **Min characters** | How many characters to type after the trigger before suggestions appear (default 1). |
-| **Max results** | Most suggestions to show at once (default 12). |
-| **Editor link preset** | file:// / VS Code / JetBrains / one of your own editors, or **Always ask** to pick the format on every insert. See [Link targets and URI templates](#link-targets-and-uri-templates). |
-| **JetBrains IDE** | Which JetBrains IDE the JetBrains preset opens (shown when it's selected). |
-| **Your editors** | Foldable list of named URL templates you add; each appears in the preset dropdown. |
-| **Show editor in status bar** | Show the active preset in the status bar; click it to switch editors without opening settings. |
-| **Editor context menu** | Add the **Find and convert to link** and **Find and open code** items to the editor's right-click menu (plus **Copy code link** when you right-click an existing code link). |
-| **Code preview on hover** | Preview the file around a code link's line on hover (Ctrl/Cmd in live preview). |
-| **Preview lines before / after** | Size of the previewed window around the target line (default 3 / 20). `-1` = no limit (to the start/end of the file). |
-| **Mark stale links** | Underline code links whose stored line has drifted (warning colour) or whose symbol is gone (error colour). See [Keeping links current](#keeping-links-current). |
+**Indexing**
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Code root** | vault's parent folder | Base folder the scan paths resolve against. Empty = the folder containing the vault. |
+| **Scan folders** | whole code root | One path per line, relative to the code root. Folders that don't exist are flagged here and in a notice on rebuild. |
+| **Skip folders** | `obj`, `bin`, `.git`, `Library`, `Temp`, `node_modules` | One per line. A bare name (`node_modules`) is skipped at any depth; a path with a slash (`src/generated`) skips only that folder, relative to the code root. |
+| **Max file size (KB)** | `2048` | Files larger than this are indexed by name only, not parsed for declarations (`0` = no limit). |
+| **Auto-refresh index** | on | Watch the scan folders and rebuild when code changes. Recursive watching isn't supported on Linux — there, rebuild manually (the plugin says so when it can't watch). |
+
+**Suggestions**
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Trigger** | `@@` | Text that starts a suggestion. |
+| **Min characters** | `1` | How many characters to type after the trigger before suggestions appear. |
+| **Max results** | `12` | Most suggestions to show at once. |
+
+**Editor & links**
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Editor link preset** | Always ask | file:// / VS Code / JetBrains / one of your own editors, or **Always ask** to pick the format on every insert. See [Link targets and URI templates](#link-targets-and-uri-templates). |
+| **JetBrains IDE** | IntelliJ IDEA | Which JetBrains IDE the JetBrains preset opens (shown when it's selected). |
+| **Your editors** | — | Foldable list of named URL templates you add; each appears in the preset dropdown. |
+| **Show editor in status bar** | off | Show the active preset in the status bar; click it to switch editors without opening settings. |
+| **Editor context menu** | on | Add the **Find and convert to link** and **Find and open code** items to the editor's right-click menu (plus **Copy code link** when you right-click an existing code link). |
+
+**Preview & embeds**
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Code preview on hover** | on | Preview the file around a code link's line on hover (Ctrl/Cmd in live preview). |
+| **Preview lines before / after** | `3` / `20` | Size of the previewed window around the target line. `-1` = no limit (to the start/end of the file). |
+
+**Stale links**
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Mark stale links** | on | Underline code links whose stored line has drifted (warning colour) or whose symbol is gone (error colour). See [Keeping links current](#keeping-links-current). |
 
 **Scan vs. skip folders.** *Scan folders* say where indexing **starts** — specific paths relative to the code root; leave the list empty to scan the whole code root. *Skip folders* then **prune** what's found, and take two forms:
 
@@ -199,8 +240,6 @@ Each enabled language lists the entity kinds it actually put in the index (e.g. 
 - a **path with a slash** (`projA/Source`) skips only that one folder, relative to the code root.
 
 So if you have two `Source` folders and want to ignore just one, list `projA/Source` — a bare `Source` would drop both.
-
-The index rebuilds in the background on startup and on demand (command **Code Linker: Rebuild code index**), and — when **Auto-refresh index** is on — automatically when source files change. It is cached to disk, so startup is instant; the background rebuild only re-reads files whose modification time changed.
 
 ### Styling
 
@@ -224,6 +263,10 @@ The inserted markdown is always `[name](uri)`.
 ## Skipped contexts
 
 Suggestions never fire inside code blocks (` ``` ` and `~~~`), inline code, frontmatter, or existing `[[...]]` and `[..](..)` links. When a link is written into a Markdown table cell, the pipe is escaped so the table isn't broken.
+
+## Performance
+
+The index is cached to disk, so startup is instant; a rebuild — on demand (**Rebuild code index**) or automatically when **Auto-refresh index** is on — only re-reads files whose modification time changed. The per-keystroke check that suppresses suggestions in code, links and frontmatter tests just the cursor position, not the whole document.
 
 ## Public API
 
@@ -284,15 +327,15 @@ To deploy into a test vault on each build, create `esbuild.local.mjs` exporting 
 
 This plugin is desktop-only (it reads the filesystem).
 
-**Via [BRAT](https://github.com/TfTHacker/obsidian42-brat) (recommended):** add the repository `max-fluff/obsidian-code-linker`, enable **Code Linker**, then set **Scan folders** in its settings.
+**From Obsidian (recommended).** Open *Settings → Community plugins → Browse*, search for **Code Linker**, then *Install* and *Enable*, and set **Scan folders** in its settings. You can also open its catalog page directly: [community.obsidian.md/plugins/code-linker](https://community.obsidian.md/plugins/code-linker).
 
-**Manually:** copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins/code-linker/`, then enable the plugin in *Settings → Community plugins*.
+**Manually.** Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/max-fluff/obsidian-code-linker/releases/latest) into `<vault>/.obsidian/plugins/code-linker/`, then enable the plugin in *Settings → Community plugins*.
 
-Once it's accepted into the community catalog it will also be installable from *Settings → Community plugins → Browse*.
+**Beta builds via [BRAT](https://github.com/TfTHacker/obsidian42-brat).** Add the repository `max-fluff/obsidian-code-linker` to test unreleased changes before they reach the catalog.
 
 ## Compatibility
 
-Requires Obsidian 1.4.0 or newer. Desktop-only — the index is built by reading the filesystem through Node's API, which isn't available on mobile. Interface in English and Russian, following Obsidian's language.
+Requires Obsidian 1.4.0 or newer. Desktop-only — the index is built by reading the filesystem through Node's API, which isn't available on mobile. On Linux, **Auto-refresh index** isn't available (it relies on recursive `fs.watch`, which Linux doesn't support) — rebuild the index manually there; everything else works. Interface in English and Russian, following Obsidian's language.
 
 ## Related plugins
 
