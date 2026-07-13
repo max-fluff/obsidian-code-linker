@@ -7,6 +7,16 @@
       "re": "^\\s*(?:\\[[^\\]]*\\]\\s*)*(?:(?:public|internal|private|protected|static|sealed|abstract|partial|readonly|unsafe|new|ref)\\s+)*(class|struct|interface|enum|record)\\s+([A-Za-z_][A-Za-z0-9_]*)",
       "kindGroup": 1,
       "nameGroup": 2
+    },
+    {
+      "re": "^\\s*(?:\\[[^\\]]*\\]\\s*)*(?:(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|extern|unsafe|new|partial|readonly|volatile|required|file)\\s+)*(?!(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|extern|unsafe|new|partial|readonly|volatile|required|file|const|if|else|for|foreach|while|do|switch|case|catch|try|finally|return|throw|yield|await|using|lock|fixed|checked|unchecked|goto|break|continue|in|is|as|class|struct|interface|enum|record|namespace|delegate|event|where|get|set|add|remove|when|select|from|orderby|group|let|var|typeof|nameof|sizeof|default|stackalloc)\\b)[A-Za-z_][\\w.]*(?:<(?:[^<>()]|<[^<>()]*>)*>)?(?:\\[\\s*,*\\s*\\])?\\??\\s+([A-Za-z_]\\w*)\\s*(?:<(?:[^<>()]|<[^<>()]*>)*>)?\\s*\\(",
+      "kind": "method",
+      "nameGroup": 1
+    },
+    {
+      "re": "^\\s*(?:\\[[^\\]]*\\]\\s*)*(?:(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|extern|unsafe|new|partial|readonly|volatile|required|file)\\s+)*(?!(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|extern|unsafe|new|partial|readonly|volatile|required|file|const|if|else|for|foreach|while|do|switch|case|catch|try|finally|return|throw|yield|await|using|lock|fixed|checked|unchecked|goto|break|continue|in|is|as|class|struct|interface|enum|record|namespace|delegate|event|where|get|set|add|remove|when|select|from|orderby|group|let|var|typeof|nameof|sizeof|default|stackalloc)\\b)[A-Za-z_][\\w.]*(?:<(?:[^<>()]|<[^<>()]*>)*>)?(?:\\[\\s*,*\\s*\\])?\\??\\s+([A-Za-z_]\\w*)\\s*(?:\\{|=>)",
+      "kind": "property",
+      "nameGroup": 1
     }
   ]
 }

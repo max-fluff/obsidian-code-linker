@@ -9,7 +9,12 @@
       "nameGroup": 1
     },
     {
-      "re": "^\\s*(?:export\\s+)?(?:async\\s+)?function\\s+([A-Za-z_$][\\w$]*)",
+      "re": "^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?function\\s+([A-Za-z_$][\\w$]*)",
+      "kind": "function",
+      "nameGroup": 1
+    },
+    {
+      "re": "^\\s*(?:export\\s+)?(?:default\\s+)?(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:async\\s+)?(?:function\\b|\\(?[A-Za-z_$)][^=;]*=>)",
       "kind": "function",
       "nameGroup": 1
     }

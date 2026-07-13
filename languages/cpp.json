@@ -7,6 +7,11 @@
       "re": "^\\s*(?:template\\s*<[^>]*>\\s*)?(class|struct|enum)\\s+([A-Za-z_]\\w*)",
       "kindGroup": 1,
       "nameGroup": 2
+    },
+    {
+      "re": "^\\s*(?:(?:static|inline|virtual|explicit|friend|constexpr|consteval|constinit|extern|const|volatile|register|mutable|thread_local)\\s+)*(?!(?:static|inline|virtual|explicit|friend|constexpr|consteval|constinit|extern|const|volatile|register|mutable|thread_local|if|else|for|while|do|switch|case|catch|return|throw|new|delete|sizeof|typedef|using|namespace|template|class|struct|union|enum|public|private|protected|goto|break|continue|static_assert|decltype|co_return|co_await|co_yield)\\b)(?:(?:unsigned|signed|long|short|const|volatile|struct|enum|union)\\s+)*[A-Za-z_]\\w*(?:\\s*::\\s*[A-Za-z_]\\w*)*(?:<(?:[^<>()]|<[^<>()]*>)*>)?(?:\\s*[*&]+|\\s+)\\s*(?:[A-Za-z_]\\w*\\s*::\\s*)*(~?[A-Za-z_]\\w*)\\s*\\(",
+      "kind": "function",
+      "nameGroup": 1
     }
   ]
 }

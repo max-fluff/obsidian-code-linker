@@ -215,6 +215,16 @@ var require_csharp = __commonJS({
           re: "^\\s*(?:\\[[^\\]]*\\]\\s*)*(?:(?:public|internal|private|protected|static|sealed|abstract|partial|readonly|unsafe|new|ref)\\s+)*(class|struct|interface|enum|record)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           kindGroup: 1,
           nameGroup: 2
+        },
+        {
+          re: "^\\s*(?:\\[[^\\]]*\\]\\s*)*(?:(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|extern|unsafe|new|partial|readonly|volatile|required|file)\\s+)*(?!(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|extern|unsafe|new|partial|readonly|volatile|required|file|const|if|else|for|foreach|while|do|switch|case|catch|try|finally|return|throw|yield|await|using|lock|fixed|checked|unchecked|goto|break|continue|in|is|as|class|struct|interface|enum|record|namespace|delegate|event|where|get|set|add|remove|when|select|from|orderby|group|let|var|typeof|nameof|sizeof|default|stackalloc)\\b)[A-Za-z_][\\w.]*(?:<(?:[^<>()]|<[^<>()]*>)*>)?(?:\\[\\s*,*\\s*\\])?\\??\\s+([A-Za-z_]\\w*)\\s*(?:<(?:[^<>()]|<[^<>()]*>)*>)?\\s*\\(",
+          kind: "method",
+          nameGroup: 1
+        },
+        {
+          re: "^\\s*(?:\\[[^\\]]*\\]\\s*)*(?:(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|extern|unsafe|new|partial|readonly|volatile|required|file)\\s+)*(?!(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|extern|unsafe|new|partial|readonly|volatile|required|file|const|if|else|for|foreach|while|do|switch|case|catch|try|finally|return|throw|yield|await|using|lock|fixed|checked|unchecked|goto|break|continue|in|is|as|class|struct|interface|enum|record|namespace|delegate|event|where|get|set|add|remove|when|select|from|orderby|group|let|var|typeof|nameof|sizeof|default|stackalloc)\\b)[A-Za-z_][\\w.]*(?:<(?:[^<>()]|<[^<>()]*>)*>)?(?:\\[\\s*,*\\s*\\])?\\??\\s+([A-Za-z_]\\w*)\\s*(?:\\{|=>)",
+          kind: "property",
+          nameGroup: 1
         }
       ]
     };
@@ -235,7 +245,12 @@ var require_typescript = __commonJS({
           nameGroup: 2
         },
         {
-          re: "^\\s*(?:export\\s+)?(?:async\\s+)?function\\s+([A-Za-z_$][\\w$]*)",
+          re: "^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?function\\s+([A-Za-z_$][\\w$]*)",
+          kind: "function",
+          nameGroup: 1
+        },
+        {
+          re: "^\\s*(?:export\\s+)?(?:default\\s+)?(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*(?::\\s*[^=;]+)?=\\s*(?:async\\s+)?(?:function\\b|(?:<[^>]*>\\s*)?\\(?[A-Za-z_$)][^=;]*=>)",
           kind: "function",
           nameGroup: 1
         }
@@ -258,7 +273,12 @@ var require_javascript = __commonJS({
           nameGroup: 1
         },
         {
-          re: "^\\s*(?:export\\s+)?(?:async\\s+)?function\\s+([A-Za-z_$][\\w$]*)",
+          re: "^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?function\\s+([A-Za-z_$][\\w$]*)",
+          kind: "function",
+          nameGroup: 1
+        },
+        {
+          re: "^\\s*(?:export\\s+)?(?:default\\s+)?(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:async\\s+)?(?:function\\b|\\(?[A-Za-z_$)][^=;]*=>)",
           kind: "function",
           nameGroup: 1
         }
@@ -294,6 +314,11 @@ var require_java = __commonJS({
           re: "^\\s*(?:@[A-Za-z_][\\w.]*(?:\\([^)]*\\))?\\s+)*(?:(?:public|protected|private|abstract|final|static|sealed|non-sealed|strictfp)\\s+)*(class|interface|enum|record)\\s+([A-Za-z_$][\\w$]*)",
           kindGroup: 1,
           nameGroup: 2
+        },
+        {
+          re: "^\\s*(?:@[A-Za-z_][\\w.]*(?:\\([^)]*\\))?\\s+)*(?:(?:public|private|protected|static|final|abstract|synchronized|native|strictfp|default)\\s+)*(?:<(?:[^<>()]|<[^<>()]*>)*>\\s*)?(?!(?:public|private|protected|static|final|abstract|synchronized|native|strictfp|default|if|else|for|while|do|switch|case|catch|try|finally|return|throw|new|instanceof|class|interface|enum|record|extends|implements|super|this|assert|yield|break|continue|import|package)\\b)[A-Za-z_][\\w.]*(?:<(?:[^<>()]|<[^<>()]*>)*>)?(?:\\[\\s*\\])*\\s+([A-Za-z_]\\w*)\\s*\\(",
+          kind: "method",
+          nameGroup: 1
         }
       ]
     };
@@ -312,6 +337,11 @@ var require_cpp = __commonJS({
           re: "^\\s*(?:template\\s*<[^>]*>\\s*)?(class|struct|enum)\\s+([A-Za-z_]\\w*)",
           kindGroup: 1,
           nameGroup: 2
+        },
+        {
+          re: "^\\s*(?:(?:static|inline|virtual|explicit|friend|constexpr|consteval|constinit|extern|const|volatile|register|mutable|thread_local)\\s+)*(?!(?:static|inline|virtual|explicit|friend|constexpr|consteval|constinit|extern|const|volatile|register|mutable|thread_local|if|else|for|while|do|switch|case|catch|return|throw|new|delete|sizeof|typedef|using|namespace|template|class|struct|union|enum|public|private|protected|goto|break|continue|static_assert|decltype|co_return|co_await|co_yield)\\b)(?:(?:unsigned|signed|long|short|const|volatile|struct|enum|union)\\s+)*[A-Za-z_]\\w*(?:\\s*::\\s*[A-Za-z_]\\w*)*(?:<(?:[^<>()]|<[^<>()]*>)*>)?(?:\\s*[*&]+|\\s+)\\s*(?:[A-Za-z_]\\w*\\s*::\\s*)*(~?[A-Za-z_]\\w*)\\s*\\(",
+          kind: "function",
+          nameGroup: 1
         }
       ]
     };

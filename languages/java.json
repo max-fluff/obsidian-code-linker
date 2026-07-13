@@ -7,6 +7,11 @@
       "re": "^\\s*(?:@[A-Za-z_][\\w.]*(?:\\([^)]*\\))?\\s+)*(?:(?:public|protected|private|abstract|final|static|sealed|non-sealed|strictfp)\\s+)*(class|interface|enum|record)\\s+([A-Za-z_$][\\w$]*)",
       "kindGroup": 1,
       "nameGroup": 2
+    },
+    {
+      "re": "^\\s*(?:@[A-Za-z_][\\w.]*(?:\\([^)]*\\))?\\s+)*(?:(?:public|private|protected|static|final|abstract|synchronized|native|strictfp|default)\\s+)*(?:<(?:[^<>()]|<[^<>()]*>)*>\\s*)?(?!(?:public|private|protected|static|final|abstract|synchronized|native|strictfp|default|if|else|for|while|do|switch|case|catch|try|finally|return|throw|new|instanceof|class|interface|enum|record|extends|implements|super|this|assert|yield|break|continue|import|package)\\b)[A-Za-z_][\\w.]*(?:<(?:[^<>()]|<[^<>()]*>)*>)?(?:\\[\\s*\\])*\\s+([A-Za-z_]\\w*)\\s*\\(",
+      "kind": "method",
+      "nameGroup": 1
     }
   ]
 }
