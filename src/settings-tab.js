@@ -15,6 +15,19 @@ class CodeLinkerSettingTab extends PluginSettingTab {
     return p ? p.key : 'file';
   }
 
+  // Whether the selected default's template uses a product placeholder (→ show the IDE dropdown).
+  selectedUsesProduct() {
+    const p = this.plugin.editorPresets().find((x) => x.key === this.selectedEditor());
+    return !!p && this.plugin.usesProduct(p.template);
+  }
+
+  // Update one editor's dropdown label as its name is typed, sparing a full re-render.
+  refreshPresetOption(dropdown, i, name) {
+    if (!dropdown) return;
+    const opt = Array.from(dropdown.selectEl.options).find((o) => o.value === 'u:' + i);
+    if (opt) opt.text = name || `Editor ${i + 1}`;
+  }
+
   // The kinds a language contributes to the index, each with a searchable toggle.
   renderSearchableKinds(lang) {
     const { containerEl } = this;
@@ -96,36 +109,47 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       .addButton((b) => b.setButtonText(t('set.rebuild.button')).onClick(() => this.plugin.rebuildIndex(true).then(() => this.display())));
 
     // --- Languages ----------------------------------------------------------
-    new Setting(containerEl).setName(t('set.heading.languages')).setHeading();
+    if (this.showLanguages === undefined) this.showLanguages = false;
     const enabled = new Set(s.enabledLanguages || []);
     const enabledCount = this.plugin.languages.filter((l) => enabled.has(l.id)).length;
-    containerEl.createEl('div', { cls: 'setting-item-description', text: t('set.languages.desc', { enabled: enabledCount, total: this.plugin.languages.length }) });
+    new Setting(containerEl)
+      .setName(t('set.heading.languages'))
+      .setHeading()
+      .addExtraButton((b) => b.setIcon(this.showLanguages ? 'chevron-up' : 'chevron-down')
+        .setTooltip(this.showLanguages ? t('set.editors.collapse') : t('set.editors.expand'))
+        .onClick(() => { this.showLanguages = !this.showLanguages; this.display(); }));
 
-    for (const lang of this.plugin.languages) {
-      const on = enabled.has(lang.id);
-      const open = this.expanded.has(lang.id);
-      const ext = lang.extensions.join(' ') || t('set.lang.noExtensions');
-      const setting = new Setting(containerEl).setName(lang.name).setDesc(t('set.lang.meta', { id: lang.id, ext }));
+    if (this.showLanguages) {
+      containerEl.createEl('div', { cls: 'setting-item-description', text: t('set.languages.desc', { enabled: enabledCount, total: this.plugin.languages.length }) });
 
-      if (on) {
-        setting.addExtraButton((b) => b.setIcon(open ? 'chevron-up' : 'chevron-down')
-          .setTooltip(open ? t('set.lang.hideEntities') : t('set.lang.showEntities'))
-          .onClick(() => { if (open) this.expanded.delete(lang.id); else this.expanded.add(lang.id); this.display(); }));
-      } else {
-        this.expanded.delete(lang.id);
+      for (const lang of this.plugin.languages) {
+        const on = enabled.has(lang.id);
+        const open = this.expanded.has(lang.id);
+        const ext = lang.extensions.join(' ') || t('set.lang.noExtensions');
+        const setting = new Setting(containerEl).setName(lang.name).setDesc(t('set.lang.meta', { id: lang.id, ext }));
+
+        if (on) {
+          setting.addExtraButton((b) => b.setIcon(open ? 'chevron-up' : 'chevron-down')
+            .setTooltip(open ? t('set.lang.hideEntities') : t('set.lang.showEntities'))
+            .onClick(() => { if (open) this.expanded.delete(lang.id); else this.expanded.add(lang.id); this.display(); }));
+        } else {
+          this.expanded.delete(lang.id);
+        }
+
+        setting.addToggle((c) => c.setValue(on).onChange(async (v) => {
+          const set = new Set(s.enabledLanguages || []);
+          if (v) set.add(lang.id); else set.delete(lang.id);
+          s.enabledLanguages = [...set];
+          await save(true);
+          this.display(); // re-render so the language's chevron/kinds appear or disappear
+        }));
+
+        if (on && open) this.renderSearchableKinds(lang);
       }
-
-      setting.addToggle((c) => c.setValue(on).onChange(async (v) => {
-        const set = new Set(s.enabledLanguages || []);
-        if (v) set.add(lang.id); else set.delete(lang.id);
-        s.enabledLanguages = [...set];
-        await save(true);
-        this.display(); // re-render so the language's chevron/kinds appear or disappear
-      }));
-
-      if (on && open) this.renderSearchableKinds(lang);
     }
 
+    // Invalid custom languages stay visible even when the list is collapsed — a warning
+    // shouldn't hide behind a fold.
     for (const bad of this.plugin.languageErrors || []) {
       const row = new Setting(containerEl).setName(bad.id).setDesc(t('set.lang.invalid', { error: bad.error }));
       row.settingEl.addClass('mod-warning');
@@ -177,34 +201,63 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       c.setValue(String(s.maxResults)).onChange(async (v) => { const n = parseInt(v, 10); s.maxResults = Number.isFinite(n) && n > 0 ? n : 12; await save(false); });
     });
 
+    let presetDropdown; // so a rename below can refresh its label without a re-render
+
     new Setting(containerEl)
       .setName(t('set.editorPreset.name'))
       .setDesc(t('set.editorPreset.desc'))
       .addDropdown((d) => {
+        presetDropdown = d;
         for (const p of this.plugin.editorPresets()) d.addOption(p.key, p.label);
         d.addOption('ask', t('set.preset.ask'));
         d.setValue(this.selectedEditor()).onChange(async (v) => {
-          const wasJetbrains = this.selectedEditor() === 'jetbrains';
+          const hadProduct = this.selectedUsesProduct();
           s.askOnInsert = v === 'ask';
           if (!s.askOnInsert) {
             const p = this.plugin.editorPresets().find((x) => x.key === v);
             if (p) s.uriTemplate = p.template;
           }
           await save(false);
-          // Re-render only when the JetBrains product picker needs to appear/disappear;
-          // other switches change nothing else on the pane, so the scroll stays put.
-          if (wasJetbrains !== (v === 'jetbrains')) this.display();
+          // Re-render only when the IDE picker needs to appear/disappear; other switches
+          // change nothing else on the pane, so the scroll stays put.
+          if (hadProduct !== this.selectedUsesProduct()) this.display();
         });
       });
 
-    if (this.selectedEditor() === 'jetbrains') {
+    if (this.selectedUsesProduct()) {
       new Setting(containerEl)
         .setName(t('set.jetbrainsProduct.name'))
         .setDesc(t('set.jetbrainsProduct.desc'))
         .addDropdown((d) => {
           for (const [code, label] of JETBRAINS_PRODUCTS) d.addOption(code, label);
+          d.addOption('ask', t('set.preset.ask'));
           d.setValue(s.jetbrainsProduct).onChange(async (v) => { s.jetbrainsProduct = v; await save(false); });
         });
+    }
+
+    // Shown presets: which built-ins appear in the pickers (the default dropdown lists all).
+    if (this.showPresets === undefined) this.showPresets = false;
+    const builtins = this.plugin.editorPresets().filter((p) => p.builtin);
+    const hiddenPresets = new Set(s.hiddenPresets || []);
+    new Setting(containerEl)
+      .setName(t('set.shownPresets.name'))
+      .setDesc(t('set.shownPresets.count', { shown: builtins.length - hiddenPresets.size, total: builtins.length }))
+      .addExtraButton((b) => b.setIcon(this.showPresets ? 'chevron-up' : 'chevron-down')
+        .setTooltip(this.showPresets ? t('set.editors.collapse') : t('set.editors.expand'))
+        .onClick(() => { this.showPresets = !this.showPresets; this.display(); }));
+
+    if (this.showPresets) {
+      containerEl.createEl('div', { cls: 'setting-item-description', text: t('set.shownPresets.desc') });
+      for (const p of builtins) {
+        const row = new Setting(containerEl).setName(p.label)
+          .addToggle((c) => c.setValue(!hiddenPresets.has(p.key)).onChange(async (v) => {
+            const set = new Set(s.hiddenPresets || []);
+            if (v) set.delete(p.key); else set.add(p.key);
+            s.hiddenPresets = [...set];
+            await save(false);
+          }));
+        row.settingEl.addClass('code-linker-kind-row');
+      }
     }
 
     // Your editors — foldable list of named URL templates that join the dropdown above.
@@ -220,7 +273,7 @@ class CodeLinkerSettingTab extends PluginSettingTab {
     if (this.showEditors) {
       editors.forEach((ed, i) => {
         const row = new Setting(containerEl)
-          .addText((c) => { c.inputEl.addClass('code-linker-editor-name'); c.setPlaceholder(t('set.editors.namePlaceholder')).setValue(ed.name).onChange(async (v) => { ed.name = v; await save(false); }); })
+          .addText((c) => { c.inputEl.addClass('code-linker-editor-name'); c.setPlaceholder(t('set.editors.namePlaceholder')).setValue(ed.name).onChange(async (v) => { ed.name = v; this.refreshPresetOption(presetDropdown, i, v); await save(false); }); })
           .addText((c) => { c.inputEl.addClass('code-linker-editor-tpl'); c.setPlaceholder('cursor://file/{abs}:{line}').setValue(ed.template).onChange(async (v) => { if (s.uriTemplate === ed.template) s.uriTemplate = v; ed.template = v; await save(false); }); })
           .addExtraButton((b) => b.setIcon('trash').setTooltip(t('set.editors.remove')).onClick(async () => { if (s.uriTemplate === ed.template) s.uriTemplate = PRESETS.file; editors.splice(i, 1); await save(false); this.display(); }));
         row.settingEl.addClass('code-linker-editor-row');

@@ -16,6 +16,12 @@ const readline = require('readline');
 const nodePath = require('path');
 
 const { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, splitLines, parseSkip, underSkip, pathInTarget, inTableCell, inCode, inLink, linkRegex } = require('./constants');
+const { resolveGit, resolveGitDir } = require('./git');
+
+// Templates whose {gitRemote}/{gitSha}/{gitBranch} resolve from the file's git repo.
+const GIT_PLACEHOLDER = /{(?:gitRemote|gitSha|gitBranch)}/;
+// Templates with a JetBrains-IDE placeholder — {jetbrainsProduct}, or the older {product}.
+const PRODUCT_PLACEHOLDER = /{(?:jetbrainsProduct|product)}/;
 
 // A declaration line is never this wide; the cap bounds backtracking from a
 // greedy user regex on a minified file so indexing can't hang.
@@ -44,6 +50,7 @@ class CodeLinkerPlugin extends Plugin {
     this._indexListeners = new Set(); // API onChange subscribers; needed before the first rebuild
     await this.loadLanguagesFile();
     this.migrateSettings();
+    this.initPresetVisibility();
     await this.loadCache();
     this.api = this.buildApi(); // app.plugins.plugins['code-linker'].api
     this.hover = new HoverPreview(this);
@@ -157,6 +164,11 @@ class CodeLinkerPlugin extends Plugin {
     this.settings.skipDirs = (this.settings.skipDirs || '').split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).join('\n');
     // The file preset used to inline an absolute path; switch old saves to the portable form.
     if (this.settings.uriTemplate === 'file:///{abs}') this.settings.uriTemplate = PRESETS.file;
+    // {product} was renamed to {jetbrainsProduct}; re-point the old built-in default so it
+    // still reads as the JetBrains preset. {product} keeps resolving, so custom ones are fine.
+    if (this.settings.uriTemplate === 'jetbrains://{product}/navigate/reference?project={project}&path={path}:{line}') {
+      this.settings.uriTemplate = PRESETS.jetbrains;
+    }
     // The "Custom" preset is gone; preserve a custom template as a named editor so it stays selectable.
     const tpl = this.settings.uriTemplate;
     const editors = this.settings.editors || (this.settings.editors = []);
@@ -765,28 +777,46 @@ class CodeLinkerPlugin extends Plugin {
     });
   }
 
-  // {root} stays in the link for portability (resolved on render/click); call
-  // fillRoot() on the result when opening the URI directly, with no note involved.
-  // `template` overrides the default preset (used by "Always ask"/"Insert as…").
-  buildUri(e, template) {
+  // An entry's absolute path on disk: the code root joined with its stored relative path.
+  entryPath(e) {
     const root = this.codeRoot();
-    const absFs = root ? nodePath.join(root, e.path) : e.path;
+    return root ? nodePath.join(root, e.path) : e.path;
+  }
+
+  // {root} stays in the link for portability (resolved on render/click); call fillRoot()
+  // when opening the URI directly. `template` overrides the default preset.
+  buildUri(e, template) {
+    const tpl = template || this.settings.uriTemplate;
+    const absFs = this.entryPath(e);
     const absFwd = absFs.split(nodePath.sep).join('/');
     const line = String(e.line || 1);
-    // First path segment is a reasonable default for IDE "project" placeholders.
-    const project = (e.path.split('/')[0] || '').trim();
-    const product = this.settings.jetbrainsProduct || 'idea';
-    // Encode names from disk so a #, ?, & or space can't rewrite the URL (e.g.
-    // JetBrains' ?project=&path= query). {abs} keeps encodeURI for the drive
-    // colon (C:); path segments use encodeURIComponent, which has no colon.
+    const project = (e.path.split('/')[0] || '').trim(); // IDE "project" default
+    // 'ask' is resolved before buildUri (per insert); fall back to idea if one slips through.
+    const jb = this.settings.jetbrainsProduct;
+    const product = jb && jb !== 'ask' ? jb : 'idea';
+    // For permalinks {path} is relative to the repo root, not the code root.
+    const git = GIT_PLACEHOLDER.test(tpl) ? resolveGit(absFs) : null;
+    const relPath = git ? nodePath.relative(git.repoRoot, absFs).split(nodePath.sep).join('/') : e.path;
+    // Encode segments so #, ?, & or spaces can't rewrite the URL ({abs} keeps the C: colon).
     const encPath = (p) => p.split('/').map(encodeURIComponent).join('/');
-    return (template || this.settings.uriTemplate)
+    return tpl
       .replace(/{abs}/g, encodeURI(absFwd))
-      .replace(/{path}/g, encPath(e.path))
+      .replace(/{path}/g, encPath(relPath))
       .replace(/{line}/g, line)
       .replace(/{name}/g, encodeURIComponent(e.name))
       .replace(/{project}/g, encodeURIComponent(project))
-      .replace(/{product}/g, product);
+      .replace(/{(?:jetbrainsProduct|product)}/g, product)
+      .replace(/{gitRemote}/g, git ? git.remote : '')
+      .replace(/{gitSha}/g, git ? git.sha : '')
+      .replace(/{gitBranch}/g, git ? (git.branch || git.sha) : '');
+  }
+
+  // True (and warns) when a permalink preset has no git repo to fill {remote}/{sha}.
+  gitTemplateBlocked(e, template) {
+    if (!GIT_PLACEHOLDER.test(template || this.settings.uriTemplate)) return false;
+    if (resolveGit(this.entryPath(e))) return false;
+    new Notice(t('notice.noGit'));
+    return true;
   }
 
   // The markdown link to insert. Inside a table cell a literal pipe splits the row.
@@ -800,6 +830,7 @@ class CodeLinkerPlugin extends Plugin {
   }
 
   insertLink(editor, e, template) {
+    if (this.gitTemplateBlocked(e, template)) return;
     const inTable = inTableCell(editor.getValue(), editor.posToOffset(editor.getCursor('from')));
     editor.replaceSelection(this.buildLink(e, inTable, template));
   }
@@ -830,13 +861,50 @@ class CodeLinkerPlugin extends Plugin {
   // where key is the value the settings dropdown stores ('u:<i>' for a user editor).
   editorPresets() {
     const out = [
-      { key: 'file', label: t('set.preset.file'), template: PRESETS.file },
-      { key: 'vscode', label: t('set.preset.vscode'), template: PRESETS.vscode },
-      { key: 'jetbrains', label: t('set.preset.jetbrains'), template: PRESETS.jetbrains },
+      { key: 'file', label: t('set.preset.file'), template: PRESETS.file, builtin: true },
+      { key: 'vscode', label: t('set.preset.vscode'), template: PRESETS.vscode, builtin: true },
+      { key: 'jetbrains', label: t('set.preset.jetbrains'), template: PRESETS.jetbrains, builtin: true },
+      { key: 'github', label: t('set.preset.github'), template: PRESETS.github, builtin: true },
+      { key: 'gitlab', label: t('set.preset.gitlab'), template: PRESETS.gitlab, builtin: true },
     ];
     (this.settings.editors || []).forEach((e, i) =>
-      out.push({ key: 'u:' + i, label: e.name || `Editor ${i + 1}`, template: e.template }));
+      out.push({ key: 'u:' + i, label: e.name || `Editor ${i + 1}`, template: e.template, builtin: false }));
     return out;
+  }
+
+  // Presets offered in the pickers: the visible ones (hiding everything falls back to all),
+  // most-recently-used first. Custom editors are always shown.
+  visiblePresets() {
+    const hidden = new Set(this.settings.hiddenPresets || []);
+    const all = this.editorPresets();
+    const shown = all.filter((p) => !hidden.has(p.key));
+    const mru = this.settings.recentPresets || [];
+    const rank = (p) => { const i = mru.indexOf(p.key); return i === -1 ? Infinity : i; };
+    return (shown.length ? shown : all)
+      .map((p, i) => ({ p, i }))
+      .sort((a, b) => (rank(a.p) - rank(b.p)) || (a.i - b.i))
+      .map((x) => x.p);
+  }
+
+  recordRecentPreset(key) {
+    const mru = (this.settings.recentPresets || []).filter((k) => k !== key);
+    mru.unshift(key);
+    this.settings.recentPresets = mru.slice(0, 8);
+    this.saveSettings();
+  }
+
+  // Runs once: GitHub/GitLab ship hidden and unhide only if the code root's remote is on
+  // that host, so you don't scroll past a permalink preset for a service you don't use.
+  initPresetVisibility() {
+    if (this.settings.presetsInitialized) return;
+    this.settings.presetsInitialized = true;
+    const git = resolveGitDir(this.codeRoot());
+    const host = git ? (git.remote.match(/^https:\/\/([^/]+)/) || [])[1] || '' : '';
+    const hidden = new Set(this.settings.hiddenPresets || []);
+    if (/github/i.test(host)) hidden.delete('github');
+    if (/gitlab/i.test(host)) hidden.delete('gitlab');
+    this.settings.hiddenPresets = [...hidden];
+    this.saveSettings();
   }
 
   updateStatusBar() {
@@ -849,43 +917,76 @@ class CodeLinkerPlugin extends Plugin {
     el.setText(t('status.editor', { name }));
   }
 
-  // Pick a preset from `items`; when JetBrains is chosen, follow with the IDE picker.
-  // Calls done(preset, ide) — ide is { key, label } for JetBrains, else null.
-  pickPreset(items, placeholder, done) {
+  usesProduct(template) {
+    return PRODUCT_PLACEHOLDER.test(template || '');
+  }
+
+  applyProduct(template, code) {
+    return template.replace(/{(?:jetbrainsProduct|product)}/g, code);
+  }
+
+  productLabel(code) {
+    if (code === 'ask') return t('set.preset.ask');
+    const p = JETBRAINS_PRODUCTS.find(([key]) => key === code);
+    return p ? p[1] : code;
+  }
+
+  // Pick a JetBrains IDE, then done(code). `allowAsk` adds an "Always ask" choice, so a
+  // fixed preset can be told to prompt for the IDE on every insert.
+  pickProduct(allowAsk, done) {
+    const items = JETBRAINS_PRODUCTS.map(([key, label]) => ({ key, label }));
+    if (allowAsk) items.unshift({ key: 'ask', label: t('set.preset.ask') });
+    new PresetPickerModal(this.app, items, (p) => done(p.key), t('modal.productPlaceholder')).open();
+  }
+
+  // Pick a preset; one whose template has a product placeholder then picks the IDE. Calls
+  // done(preset, code) — code is null without a product placeholder, else the IDE (or 'ask').
+  pickPreset(items, placeholder, done, allowAsk) {
     new PresetPickerModal(this.app, items, (p) => {
-      if (p.key !== 'jetbrains') return done(p, null);
-      const ides = JETBRAINS_PRODUCTS.map(([key, label]) => ({ key, label }));
-      new PresetPickerModal(this.app, ides, (ide) => done(p, ide), t('modal.productPlaceholder')).open();
+      if (!this.usesProduct(p.template)) return done(p, null);
+      this.pickProduct(allowAsk, (code) => done(p, code));
     }, placeholder).open();
   }
 
-  // Run `run(template)` for a link action, prompting for the format only when `ask`
-  // is set (always-ask mode or the "…as" command); a JetBrains IDE bakes into the template.
+  // Always-ask mode picks the format (and IDE) per insert; a fixed preset still prompts for
+  // the IDE when the JetBrains-IDE setting is "Always ask".
   withFormat(ask, run) {
-    if (!ask) { run(undefined); return; }
-    this.pickPreset(this.editorPresets(), t('modal.formatPlaceholder'), (p, ide) =>
-      run(ide ? p.template.replace('{product}', ide.key) : p.template));
+    if (ask) {
+      this.pickPreset(this.visiblePresets(), t('modal.formatPlaceholder'), (p, code) => {
+        this.recordRecentPreset(p.key);
+        run(code ? this.applyProduct(p.template, code) : p.template);
+      }, false);
+      return;
+    }
+    const tpl = this.settings.uriTemplate;
+    if (this.usesProduct(tpl) && this.settings.jetbrainsProduct === 'ask') {
+      this.pickProduct(false, (code) => run(this.applyProduct(tpl, code)));
+      return;
+    }
+    run(undefined);
   }
 
-  // Switch the default preset (or "Always ask") without opening settings; a chosen
-  // JetBrains IDE also updates the JetBrains IDE setting.
+  // Switch the default preset (or "Always ask") without opening settings; a product preset
+  // also sets the JetBrains-IDE setting, which may itself be "Always ask".
   switchPreset() {
-    const items = this.editorPresets().concat({ key: 'ask', label: t('set.preset.ask') });
-    this.pickPreset(items, t('modal.switchPlaceholder'), async (p, ide) => {
+    const items = this.visiblePresets().concat({ key: 'ask', label: t('set.preset.ask') });
+    this.pickPreset(items, t('modal.switchPlaceholder'), async (p, code) => {
       this.settings.askOnInsert = p.key === 'ask';
       if (p.key !== 'ask') {
         this.settings.uriTemplate = p.template;
-        if (ide) this.settings.jetbrainsProduct = ide.key;
+        if (code) this.settings.jetbrainsProduct = code;
+        this.recordRecentPreset(p.key);
       }
       await this.saveSettings();
-      new Notice(t('notice.editorSet', { name: ide ? ide.label : p.label }));
-    });
+      new Notice(t('notice.editorSet', { name: code ? this.productLabel(code) : p.label }));
+    }, true);
   }
 
   // Resolve {root} to the absolute code root: a copied link is usually pasted outside
   // the vault (a browser, a terminal), where the portable {root} token wouldn't resolve.
   // Inserted links keep {root} for note portability.
   copyLink(e, template) {
+    if (this.gitTemplateBlocked(e, template)) return;
     navigator.clipboard.writeText(this.fillRoot(this.buildLink(e, false, template)));
     new Notice(t('notice.copied'));
   }

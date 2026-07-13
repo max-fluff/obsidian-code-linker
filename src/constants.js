@@ -4,11 +4,15 @@ const PRESETS = {
   // {root} keeps the note portable: the file holds a relative path, the absolute
   // code root is filled in on render/click (same mechanism as the file preset).
   vscode: 'vscode://file/{root}/{path}:{line}',
-  // {product} resolves to the chosen JetBrains IDE (the "JetBrains IDE" setting).
-  jetbrains: 'jetbrains://{product}/navigate/reference?project={project}&path={path}:{line}',
+  // {jetbrainsProduct} resolves to the chosen JetBrains IDE (the "JetBrains IDE" setting).
+  jetbrains: 'jetbrains://{jetbrainsProduct}/navigate/reference?project={project}&path={path}:{line}',
   // {root} is left in the note and resolved to the absolute code root on click,
   // so the link text stays portable across machines.
   file: 'file:///{root}/{path}',
+  // Web permalinks: {gitRemote}/{gitSha} come from the file's git repo at insert time,
+  // pinning the link to that exact commit. GitLab serves blobs under /-/blob.
+  github: '{gitRemote}/blob/{gitSha}/{path}#L{line}',
+  gitlab: '{gitRemote}/-/blob/{gitSha}/{path}#L{line}',
 };
 
 // Our language ids -> Prism grammar ids, for hover-preview syntax highlighting.
@@ -47,6 +51,9 @@ const DEFAULT_SETTINGS = {
   scanRoots: '', // one path per line, relative to codeRoot
   skipDirs: 'obj\nbin\n.git\nLibrary\nTemp\nnode_modules', // one folder name per line
   editors: [], // user-defined editor presets, each { name, template }
+  hiddenPresets: ['github', 'gitlab'], // presets kept out of the pickers; revealed on first run if the remote matches
+  presetsInitialized: false, // whether the one-time preset reveal has run
+  recentPresets: [], // preset keys, most-recent first, to float recent picks up the picker
   askOnInsert: true, // ask which editor format to use on every insert (vs. a fixed preset)
   showStatusBar: false, // show the active editor preset in the status bar, click to switch
   enabledLanguages: null, // null on first run => every built-in enabled

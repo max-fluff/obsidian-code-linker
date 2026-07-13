@@ -13,11 +13,15 @@ var require_constants = __commonJS({
       // {root} keeps the note portable: the file holds a relative path, the absolute
       // code root is filled in on render/click (same mechanism as the file preset).
       vscode: "vscode://file/{root}/{path}:{line}",
-      // {product} resolves to the chosen JetBrains IDE (the "JetBrains IDE" setting).
-      jetbrains: "jetbrains://{product}/navigate/reference?project={project}&path={path}:{line}",
+      // {jetbrainsProduct} resolves to the chosen JetBrains IDE (the "JetBrains IDE" setting).
+      jetbrains: "jetbrains://{jetbrainsProduct}/navigate/reference?project={project}&path={path}:{line}",
       // {root} is left in the note and resolved to the absolute code root on click,
       // so the link text stays portable across machines.
-      file: "file:///{root}/{path}"
+      file: "file:///{root}/{path}",
+      // Web permalinks: {gitRemote}/{gitSha} come from the file's git repo at insert time,
+      // pinning the link to that exact commit. GitLab serves blobs under /-/blob.
+      github: "{gitRemote}/blob/{gitSha}/{path}#L{line}",
+      gitlab: "{gitRemote}/-/blob/{gitSha}/{path}#L{line}"
     };
     var PRISM_LANG2 = {
       csharp: "csharp",
@@ -55,6 +59,12 @@ var require_constants = __commonJS({
       // one folder name per line
       editors: [],
       // user-defined editor presets, each { name, template }
+      hiddenPresets: ["github", "gitlab"],
+      // presets kept out of the pickers; revealed on first run if the remote matches
+      presetsInitialized: false,
+      // whether the one-time preset reveal has run
+      recentPresets: [],
+      // preset keys, most-recent first, to float recent picks up the picker
       askOnInsert: true,
       // ask which editor format to use on every insert (vs. a fixed preset)
       showStatusBar: false,
@@ -200,6 +210,127 @@ var require_constants = __commonJS({
       return false;
     }
     module2.exports = { PRESETS: PRESETS2, PRISM_LANG: PRISM_LANG2, JETBRAINS_PRODUCTS: JETBRAINS_PRODUCTS2, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, LANGUAGES_TEMPLATE: LANGUAGES_TEMPLATE2, splitLines: splitLines2, parseSkip: parseSkip2, underSkip: underSkip2, pathInTarget: pathInTarget2, isProtected, inCode: inCode2, inLink: inLink2, inInlineCode, isFenceLine, linkRegex: linkRegex2, inTableCell: inTableCell2 };
+  }
+});
+
+// src/git.js
+var require_git = __commonJS({
+  "src/git.js"(exports2, module2) {
+    "use strict";
+    var fs2 = require("fs");
+    var nodePath2 = require("path");
+    function resolveGit2(absFile) {
+      return repoFrom(nodePath2.dirname(absFile));
+    }
+    function resolveGitDir2(dir) {
+      return repoFrom(dir);
+    }
+    function repoFrom(startDir) {
+      const found = findGitDir(startDir);
+      if (!found)
+        return null;
+      const head = readHead(found.gitDir);
+      if (!head)
+        return null;
+      const remote = readRemote(found.gitDir);
+      if (!remote)
+        return null;
+      return { remote, sha: head.sha, branch: head.branch, repoRoot: found.repoRoot };
+    }
+    function findGitDir(startDir) {
+      let dir = startDir;
+      for (; ; ) {
+        const dotGit = nodePath2.join(dir, ".git");
+        let st;
+        try {
+          st = fs2.statSync(dotGit);
+        } catch (e) {
+          st = null;
+        }
+        if (st && st.isDirectory())
+          return { repoRoot: dir, gitDir: dotGit };
+        if (st) {
+          const m = readText(dotGit).match(/^gitdir:\s*(.+)$/m);
+          if (m) {
+            const p = m[1].trim();
+            return { repoRoot: dir, gitDir: nodePath2.isAbsolute(p) ? p : nodePath2.resolve(dir, p) };
+          }
+        }
+        const parent = nodePath2.dirname(dir);
+        if (parent === dir)
+          return null;
+        dir = parent;
+      }
+    }
+    function readHead(gitDir) {
+      const head = readText(nodePath2.join(gitDir, "HEAD")).trim();
+      const ref = head.match(/^ref:\s*(.+)$/);
+      if (!ref)
+        return /^[0-9a-f]{40}$/i.test(head) ? { sha: head, branch: null } : null;
+      const refName = ref[1].trim();
+      const sha = readRef(gitDir, refName);
+      if (!sha)
+        return null;
+      return { sha, branch: refName.startsWith("refs/heads/") ? refName.slice("refs/heads/".length) : null };
+    }
+    function readRef(gitDir, refName) {
+      const dirs = [gitDir];
+      const common = readText(nodePath2.join(gitDir, "commondir")).trim();
+      if (common)
+        dirs.push(nodePath2.resolve(gitDir, common));
+      for (const d of dirs) {
+        const loose = readText(nodePath2.join(d, refName)).trim();
+        if (/^[0-9a-f]{40}$/i.test(loose))
+          return loose;
+        for (const line of readText(nodePath2.join(d, "packed-refs")).split("\n")) {
+          const m = line.match(/^([0-9a-f]{40})\s+(.+)$/);
+          if (m && m[2].trim() === refName)
+            return m[1];
+        }
+      }
+      return null;
+    }
+    function readRemote(gitDir) {
+      const config = readText(nodePath2.join(gitDir, "config"));
+      let section = "", origin = "", fallback = "";
+      for (const raw of config.split("\n")) {
+        const line = raw.trim();
+        const sec = line.match(/^\[(.+?)\]$/);
+        if (sec) {
+          section = sec[1].trim();
+          continue;
+        }
+        const kv = line.match(/^url\s*=\s*(.+)$/);
+        if (!kv || !/^remote\b/.test(section))
+          continue;
+        if (/^remote\s+"origin"$/.test(section))
+          origin = kv[1].trim();
+        else if (!fallback)
+          fallback = kv[1].trim();
+      }
+      return normalizeRemote(origin || fallback);
+    }
+    function normalizeRemote(url) {
+      let s = (url || "").trim();
+      if (!s)
+        return null;
+      const scp = s.match(/^[^/@]+@([^:]+):(.+)$/);
+      if (scp)
+        s = "https://" + scp[1] + "/" + scp[2];
+      else
+        s = s.replace(/^(?:ssh|git|http):\/\//i, "https://");
+      s = s.replace(/^(https:\/\/)[^/@]+@/i, "$1");
+      s = s.replace(/\.git$/i, "").replace(/\/+$/, "");
+      return /^https:\/\/[^/]+\/.+/.test(s) ? s : null;
+    }
+    function readText(path) {
+      try {
+        return fs2.readFileSync(path, "utf8");
+      } catch (e) {
+        return "";
+      }
+    }
+    module2.exports = { resolveGit: resolveGit2, resolveGitDir: resolveGitDir2, normalizeRemote };
   }
 });
 
@@ -740,6 +871,7 @@ var require_en = __commonJS({
       "notice.indexed": "Code Linker: {entries} indexed",
       "notice.missingFolders": "Code Linker: scan folder not found \u2014 {folders}",
       "notice.copied": "Code Linker: link copied",
+      "notice.noGit": "Code Linker: no git repository (with a remote) found for this file",
       "notice.editorSet": "Code Linker: links now open in {name}",
       "notice.noSelection": "Code Linker: select a name or path first",
       "notice.noMatch": "Code Linker: no code entry matches \u201C{query}\u201D",
@@ -816,14 +948,19 @@ var require_en = __commonJS({
       "set.preset.vscode": "VS Code",
       "set.preset.jetbrains": "JetBrains",
       "set.preset.file": "file://",
+      "set.preset.github": "GitHub permalink",
+      "set.preset.gitlab": "GitLab permalink",
       "set.preset.ask": "Always ask",
       "set.jetbrainsProduct.name": "JetBrains IDE",
       "set.jetbrainsProduct.desc": "Which JetBrains IDE the links open in.",
+      "set.shownPresets.name": "Shown in the picker",
+      "set.shownPresets.count": "{shown} of {total} shown",
+      "set.shownPresets.desc": "Which built-in presets appear in the pickers. Your own editors always appear.",
       "set.editors.name": "Your editors",
       "set.editors.count": "{n} added",
       "set.editors.collapse": "Collapse",
       "set.editors.expand": "Expand",
-      "set.editors.desc": "Named presets for the dropdown above. Placeholders: {abs} {path} {line} {name} {project} {product} {root}.",
+      "set.editors.desc": "Named presets for the dropdown above. Placeholders: {abs} {path} {line} {name} {project} {jetbrainsProduct} {root} {gitRemote} {gitSha} {gitBranch}.",
       "set.editors.namePlaceholder": "Name",
       "set.editors.remove": "Remove",
       "set.editors.add": "+ Add editor",
@@ -882,6 +1019,7 @@ var require_ru = __commonJS({
       "notice.indexed": "Code Linker: \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
       "notice.missingFolders": "Code Linker: \u043F\u0430\u043F\u043A\u0430 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u2014 {folders}",
       "notice.copied": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u0430",
+      "notice.noGit": "Code Linker: \u0434\u043B\u044F \u044D\u0442\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D git-\u0440\u0435\u043F\u043E\u0437\u0438\u0442\u043E\u0440\u0438\u0439 \u0441 remote",
       "notice.editorSet": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0438 \u0442\u0435\u043F\u0435\u0440\u044C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432 {name}",
       "notice.noSelection": "Code Linker: \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u044B\u0434\u0435\u043B\u0438\u0442\u0435 \u0438\u043C\u044F \u0438\u043B\u0438 \u043F\u0443\u0442\u044C",
       "notice.noMatch": "Code Linker: \u043D\u0435\u0442 \u0437\u0430\u043F\u0438\u0441\u0438 \u043A\u043E\u0434\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
@@ -958,14 +1096,19 @@ var require_ru = __commonJS({
       "set.preset.vscode": "VS Code",
       "set.preset.jetbrains": "JetBrains",
       "set.preset.file": "file://",
+      "set.preset.github": "\u041F\u0435\u0440\u043C\u0430\u043B\u0438\u043D\u043A GitHub",
+      "set.preset.gitlab": "\u041F\u0435\u0440\u043C\u0430\u043B\u0438\u043D\u043A GitLab",
       "set.preset.ask": "\u0412\u0441\u0435\u0433\u0434\u0430 \u0441\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0442\u044C",
       "set.jetbrainsProduct.name": "IDE JetBrains",
       "set.jetbrainsProduct.desc": "\u0412 \u043A\u0430\u043A\u043E\u0439 JetBrains IDE \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0441\u0441\u044B\u043B\u043A\u0438.",
+      "set.shownPresets.name": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0432 \u0432\u044B\u0431\u043E\u0440\u0435",
+      "set.shownPresets.count": "\u043F\u043E\u043A\u0430\u0437\u0430\u043D\u043E: {shown} \u0438\u0437 {total}",
+      "set.shownPresets.desc": "\u041A\u0430\u043A\u0438\u0435 \u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0435 \u043F\u0440\u0435\u0441\u0435\u0442\u044B \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432 \u043F\u0438\u043A\u0435\u0440\u0430\u0445. \u0412\u0430\u0448\u0438 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u044B \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432\u0441\u0435\u0433\u0434\u0430.",
       "set.editors.name": "\u0412\u0430\u0448\u0438 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u044B",
       "set.editors.count": "\u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u043E: {n}",
       "set.editors.collapse": "\u0421\u0432\u0435\u0440\u043D\u0443\u0442\u044C",
       "set.editors.expand": "\u0420\u0430\u0437\u0432\u0435\u0440\u043D\u0443\u0442\u044C",
-      "set.editors.desc": "\u0418\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u043D\u044B\u0435 \u043F\u0440\u0435\u0441\u0435\u0442\u044B \u0434\u043B\u044F \u0441\u043F\u0438\u0441\u043A\u0430 \u0432\u044B\u0448\u0435. \u041F\u043B\u0435\u0439\u0441\u0445\u043E\u043B\u0434\u0435\u0440\u044B: {abs} {path} {line} {name} {project} {product} {root}.",
+      "set.editors.desc": "\u0418\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u043D\u044B\u0435 \u043F\u0440\u0435\u0441\u0435\u0442\u044B \u0434\u043B\u044F \u0441\u043F\u0438\u0441\u043A\u0430 \u0432\u044B\u0448\u0435. \u041F\u043B\u0435\u0439\u0441\u0445\u043E\u043B\u0434\u0435\u0440\u044B: {abs} {path} {line} {name} {project} {jetbrainsProduct} {root} {gitRemote} {gitSha} {gitBranch}.",
       "set.editors.namePlaceholder": "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435",
       "set.editors.remove": "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
       "set.editors.add": "+ \u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440",
@@ -1504,6 +1647,19 @@ var require_settings_tab = __commonJS({
         const p = this.plugin.editorPresets().find((x) => x.template === this.plugin.settings.uriTemplate);
         return p ? p.key : "file";
       }
+      // Whether the selected default's template uses a product placeholder (→ show the IDE dropdown).
+      selectedUsesProduct() {
+        const p = this.plugin.editorPresets().find((x) => x.key === this.selectedEditor());
+        return !!p && this.plugin.usesProduct(p.template);
+      }
+      // Update one editor's dropdown label as its name is typed, sparing a full re-render.
+      refreshPresetOption(dropdown, i, name) {
+        if (!dropdown)
+          return;
+        const opt = Array.from(dropdown.selectEl.options).find((o) => o.value === "u:" + i);
+        if (opt)
+          opt.text = name || `Editor ${i + 1}`;
+      }
       // The kinds a language contributes to the index, each with a searchable toggle.
       renderSearchableKinds(lang) {
         const { containerEl } = this;
@@ -1586,38 +1742,45 @@ var require_settings_tab = __commonJS({
           warn.settingEl.addClass("mod-warning");
         }
         new Setting(containerEl).setName(t2("set.rebuild.name")).addButton((b) => b.setButtonText(t2("set.rebuild.button")).onClick(() => this.plugin.rebuildIndex(true).then(() => this.display())));
-        new Setting(containerEl).setName(t2("set.heading.languages")).setHeading();
+        if (this.showLanguages === void 0)
+          this.showLanguages = false;
         const enabled = new Set(s.enabledLanguages || []);
         const enabledCount = this.plugin.languages.filter((l) => enabled.has(l.id)).length;
-        containerEl.createEl("div", { cls: "setting-item-description", text: t2("set.languages.desc", { enabled: enabledCount, total: this.plugin.languages.length }) });
-        for (const lang of this.plugin.languages) {
-          const on = enabled.has(lang.id);
-          const open = this.expanded.has(lang.id);
-          const ext = lang.extensions.join(" ") || t2("set.lang.noExtensions");
-          const setting = new Setting(containerEl).setName(lang.name).setDesc(t2("set.lang.meta", { id: lang.id, ext }));
-          if (on) {
-            setting.addExtraButton((b) => b.setIcon(open ? "chevron-up" : "chevron-down").setTooltip(open ? t2("set.lang.hideEntities") : t2("set.lang.showEntities")).onClick(() => {
-              if (open)
-                this.expanded.delete(lang.id);
+        new Setting(containerEl).setName(t2("set.heading.languages")).setHeading().addExtraButton((b) => b.setIcon(this.showLanguages ? "chevron-up" : "chevron-down").setTooltip(this.showLanguages ? t2("set.editors.collapse") : t2("set.editors.expand")).onClick(() => {
+          this.showLanguages = !this.showLanguages;
+          this.display();
+        }));
+        if (this.showLanguages) {
+          containerEl.createEl("div", { cls: "setting-item-description", text: t2("set.languages.desc", { enabled: enabledCount, total: this.plugin.languages.length }) });
+          for (const lang of this.plugin.languages) {
+            const on = enabled.has(lang.id);
+            const open = this.expanded.has(lang.id);
+            const ext = lang.extensions.join(" ") || t2("set.lang.noExtensions");
+            const setting = new Setting(containerEl).setName(lang.name).setDesc(t2("set.lang.meta", { id: lang.id, ext }));
+            if (on) {
+              setting.addExtraButton((b) => b.setIcon(open ? "chevron-up" : "chevron-down").setTooltip(open ? t2("set.lang.hideEntities") : t2("set.lang.showEntities")).onClick(() => {
+                if (open)
+                  this.expanded.delete(lang.id);
+                else
+                  this.expanded.add(lang.id);
+                this.display();
+              }));
+            } else {
+              this.expanded.delete(lang.id);
+            }
+            setting.addToggle((c) => c.setValue(on).onChange(async (v) => {
+              const set = new Set(s.enabledLanguages || []);
+              if (v)
+                set.add(lang.id);
               else
-                this.expanded.add(lang.id);
+                set.delete(lang.id);
+              s.enabledLanguages = [...set];
+              await save(true);
               this.display();
             }));
-          } else {
-            this.expanded.delete(lang.id);
+            if (on && open)
+              this.renderSearchableKinds(lang);
           }
-          setting.addToggle((c) => c.setValue(on).onChange(async (v) => {
-            const set = new Set(s.enabledLanguages || []);
-            if (v)
-              set.add(lang.id);
-            else
-              set.delete(lang.id);
-            s.enabledLanguages = [...set];
-            await save(true);
-            this.display();
-          }));
-          if (on && open)
-            this.renderSearchableKinds(lang);
         }
         for (const bad of this.plugin.languageErrors || []) {
           const row = new Setting(containerEl).setName(bad.id).setDesc(t2("set.lang.invalid", { error: bad.error }));
@@ -1670,12 +1833,14 @@ var require_settings_tab = __commonJS({
             await save(false);
           });
         });
+        let presetDropdown;
         new Setting(containerEl).setName(t2("set.editorPreset.name")).setDesc(t2("set.editorPreset.desc")).addDropdown((d) => {
+          presetDropdown = d;
           for (const p of this.plugin.editorPresets())
             d.addOption(p.key, p.label);
           d.addOption("ask", t2("set.preset.ask"));
           d.setValue(this.selectedEditor()).onChange(async (v) => {
-            const wasJetbrains = this.selectedEditor() === "jetbrains";
+            const hadProduct = this.selectedUsesProduct();
             s.askOnInsert = v === "ask";
             if (!s.askOnInsert) {
               const p = this.plugin.editorPresets().find((x) => x.key === v);
@@ -1683,19 +1848,43 @@ var require_settings_tab = __commonJS({
                 s.uriTemplate = p.template;
             }
             await save(false);
-            if (wasJetbrains !== (v === "jetbrains"))
+            if (hadProduct !== this.selectedUsesProduct())
               this.display();
           });
         });
-        if (this.selectedEditor() === "jetbrains") {
+        if (this.selectedUsesProduct()) {
           new Setting(containerEl).setName(t2("set.jetbrainsProduct.name")).setDesc(t2("set.jetbrainsProduct.desc")).addDropdown((d) => {
             for (const [code, label] of JETBRAINS_PRODUCTS2)
               d.addOption(code, label);
+            d.addOption("ask", t2("set.preset.ask"));
             d.setValue(s.jetbrainsProduct).onChange(async (v) => {
               s.jetbrainsProduct = v;
               await save(false);
             });
           });
+        }
+        if (this.showPresets === void 0)
+          this.showPresets = false;
+        const builtins = this.plugin.editorPresets().filter((p) => p.builtin);
+        const hiddenPresets = new Set(s.hiddenPresets || []);
+        new Setting(containerEl).setName(t2("set.shownPresets.name")).setDesc(t2("set.shownPresets.count", { shown: builtins.length - hiddenPresets.size, total: builtins.length })).addExtraButton((b) => b.setIcon(this.showPresets ? "chevron-up" : "chevron-down").setTooltip(this.showPresets ? t2("set.editors.collapse") : t2("set.editors.expand")).onClick(() => {
+          this.showPresets = !this.showPresets;
+          this.display();
+        }));
+        if (this.showPresets) {
+          containerEl.createEl("div", { cls: "setting-item-description", text: t2("set.shownPresets.desc") });
+          for (const p of builtins) {
+            const row = new Setting(containerEl).setName(p.label).addToggle((c) => c.setValue(!hiddenPresets.has(p.key)).onChange(async (v) => {
+              const set = new Set(s.hiddenPresets || []);
+              if (v)
+                set.delete(p.key);
+              else
+                set.add(p.key);
+              s.hiddenPresets = [...set];
+              await save(false);
+            }));
+            row.settingEl.addClass("code-linker-kind-row");
+          }
         }
         if (this.showEditors === void 0)
           this.showEditors = false;
@@ -1710,6 +1899,7 @@ var require_settings_tab = __commonJS({
               c.inputEl.addClass("code-linker-editor-name");
               c.setPlaceholder(t2("set.editors.namePlaceholder")).setValue(ed.name).onChange(async (v) => {
                 ed.name = v;
+                this.refreshPresetOption(presetDropdown, i, v);
                 await save(false);
               });
             }).addText((c) => {
@@ -1859,6 +2049,9 @@ var fsp = fs.promises;
 var readline = require("readline");
 var nodePath = require("path");
 var { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, splitLines, parseSkip, underSkip, pathInTarget, inTableCell, inCode, inLink, linkRegex } = require_constants();
+var { resolveGit, resolveGitDir } = require_git();
+var GIT_PLACEHOLDER = /{(?:gitRemote|gitSha|gitBranch)}/;
+var PRODUCT_PLACEHOLDER = /{(?:jetbrainsProduct|product)}/;
 var MAX_PARSE_LINE_LENGTH = 2e3;
 var { BUILTIN_LANGUAGES } = require_builtin_languages();
 var { CodeIndexSuggest } = require_suggest();
@@ -1883,6 +2076,7 @@ var CodeLinkerPlugin = class extends Plugin {
     this._indexListeners = /* @__PURE__ */ new Set();
     await this.loadLanguagesFile();
     this.migrateSettings();
+    this.initPresetVisibility();
     await this.loadCache();
     this.api = this.buildApi();
     this.hover = new HoverPreview(this);
@@ -1976,6 +2170,9 @@ var CodeLinkerPlugin = class extends Plugin {
     this.settings.skipDirs = (this.settings.skipDirs || "").split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).join("\n");
     if (this.settings.uriTemplate === "file:///{abs}")
       this.settings.uriTemplate = PRESETS.file;
+    if (this.settings.uriTemplate === "jetbrains://{product}/navigate/reference?project={project}&path={path}:{line}") {
+      this.settings.uriTemplate = PRESETS.jetbrains;
+    }
     const tpl = this.settings.uriTemplate;
     const editors = this.settings.editors || (this.settings.editors = []);
     const known = Object.values(PRESETS).includes(tpl) || editors.some((e) => e.template === tpl);
@@ -2588,18 +2785,34 @@ var CodeLinkerPlugin = class extends Plugin {
       stream.on("error", reject);
     });
   }
-  // {root} stays in the link for portability (resolved on render/click); call
-  // fillRoot() on the result when opening the URI directly, with no note involved.
-  // `template` overrides the default preset (used by "Always ask"/"Insert as…").
-  buildUri(e, template) {
+  // An entry's absolute path on disk: the code root joined with its stored relative path.
+  entryPath(e) {
     const root = this.codeRoot();
-    const absFs = root ? nodePath.join(root, e.path) : e.path;
+    return root ? nodePath.join(root, e.path) : e.path;
+  }
+  // {root} stays in the link for portability (resolved on render/click); call fillRoot()
+  // when opening the URI directly. `template` overrides the default preset.
+  buildUri(e, template) {
+    const tpl = template || this.settings.uriTemplate;
+    const absFs = this.entryPath(e);
     const absFwd = absFs.split(nodePath.sep).join("/");
     const line = String(e.line || 1);
     const project = (e.path.split("/")[0] || "").trim();
-    const product = this.settings.jetbrainsProduct || "idea";
+    const jb = this.settings.jetbrainsProduct;
+    const product = jb && jb !== "ask" ? jb : "idea";
+    const git = GIT_PLACEHOLDER.test(tpl) ? resolveGit(absFs) : null;
+    const relPath = git ? nodePath.relative(git.repoRoot, absFs).split(nodePath.sep).join("/") : e.path;
     const encPath = (p) => p.split("/").map(encodeURIComponent).join("/");
-    return (template || this.settings.uriTemplate).replace(/{abs}/g, encodeURI(absFwd)).replace(/{path}/g, encPath(e.path)).replace(/{line}/g, line).replace(/{name}/g, encodeURIComponent(e.name)).replace(/{project}/g, encodeURIComponent(project)).replace(/{product}/g, product);
+    return tpl.replace(/{abs}/g, encodeURI(absFwd)).replace(/{path}/g, encPath(relPath)).replace(/{line}/g, line).replace(/{name}/g, encodeURIComponent(e.name)).replace(/{project}/g, encodeURIComponent(project)).replace(/{(?:jetbrainsProduct|product)}/g, product).replace(/{gitRemote}/g, git ? git.remote : "").replace(/{gitSha}/g, git ? git.sha : "").replace(/{gitBranch}/g, git ? git.branch || git.sha : "");
+  }
+  // True (and warns) when a permalink preset has no git repo to fill {remote}/{sha}.
+  gitTemplateBlocked(e, template) {
+    if (!GIT_PLACEHOLDER.test(template || this.settings.uriTemplate))
+      return false;
+    if (resolveGit(this.entryPath(e)))
+      return false;
+    new Notice(t("notice.noGit"));
+    return true;
   }
   // The markdown link to insert. Inside a table cell a literal pipe splits the row.
   buildLink(e, inTable, template) {
@@ -2610,6 +2823,8 @@ var CodeLinkerPlugin = class extends Plugin {
     new CodeLinkModal(this.app, this, { onChoose, query }).open();
   }
   insertLink(editor, e, template) {
+    if (this.gitTemplateBlocked(e, template))
+      return;
     const inTable = inTableCell(editor.getValue(), editor.posToOffset(editor.getCursor("from")));
     editor.replaceSelection(this.buildLink(e, inTable, template));
   }
@@ -2636,12 +2851,49 @@ var CodeLinkerPlugin = class extends Plugin {
   // where key is the value the settings dropdown stores ('u:<i>' for a user editor).
   editorPresets() {
     const out = [
-      { key: "file", label: t("set.preset.file"), template: PRESETS.file },
-      { key: "vscode", label: t("set.preset.vscode"), template: PRESETS.vscode },
-      { key: "jetbrains", label: t("set.preset.jetbrains"), template: PRESETS.jetbrains }
+      { key: "file", label: t("set.preset.file"), template: PRESETS.file, builtin: true },
+      { key: "vscode", label: t("set.preset.vscode"), template: PRESETS.vscode, builtin: true },
+      { key: "jetbrains", label: t("set.preset.jetbrains"), template: PRESETS.jetbrains, builtin: true },
+      { key: "github", label: t("set.preset.github"), template: PRESETS.github, builtin: true },
+      { key: "gitlab", label: t("set.preset.gitlab"), template: PRESETS.gitlab, builtin: true }
     ];
-    (this.settings.editors || []).forEach((e, i) => out.push({ key: "u:" + i, label: e.name || `Editor ${i + 1}`, template: e.template }));
+    (this.settings.editors || []).forEach((e, i) => out.push({ key: "u:" + i, label: e.name || `Editor ${i + 1}`, template: e.template, builtin: false }));
     return out;
+  }
+  // Presets offered in the pickers: the visible ones (hiding everything falls back to all),
+  // most-recently-used first. Custom editors are always shown.
+  visiblePresets() {
+    const hidden = new Set(this.settings.hiddenPresets || []);
+    const all = this.editorPresets();
+    const shown = all.filter((p) => !hidden.has(p.key));
+    const mru = this.settings.recentPresets || [];
+    const rank = (p) => {
+      const i = mru.indexOf(p.key);
+      return i === -1 ? Infinity : i;
+    };
+    return (shown.length ? shown : all).map((p, i) => ({ p, i })).sort((a, b) => rank(a.p) - rank(b.p) || a.i - b.i).map((x) => x.p);
+  }
+  recordRecentPreset(key) {
+    const mru = (this.settings.recentPresets || []).filter((k) => k !== key);
+    mru.unshift(key);
+    this.settings.recentPresets = mru.slice(0, 8);
+    this.saveSettings();
+  }
+  // Runs once: GitHub/GitLab ship hidden and unhide only if the code root's remote is on
+  // that host, so you don't scroll past a permalink preset for a service you don't use.
+  initPresetVisibility() {
+    if (this.settings.presetsInitialized)
+      return;
+    this.settings.presetsInitialized = true;
+    const git = resolveGitDir(this.codeRoot());
+    const host = git ? (git.remote.match(/^https:\/\/([^/]+)/) || [])[1] || "" : "";
+    const hidden = new Set(this.settings.hiddenPresets || []);
+    if (/github/i.test(host))
+      hidden.delete("github");
+    if (/gitlab/i.test(host))
+      hidden.delete("gitlab");
+    this.settings.hiddenPresets = [...hidden];
+    this.saveSettings();
   }
   updateStatusBar() {
     const el = this.editorStatusEl;
@@ -2656,44 +2908,74 @@ var CodeLinkerPlugin = class extends Plugin {
     el.show();
     el.setText(t("status.editor", { name }));
   }
-  // Pick a preset from `items`; when JetBrains is chosen, follow with the IDE picker.
-  // Calls done(preset, ide) — ide is { key, label } for JetBrains, else null.
-  pickPreset(items, placeholder, done) {
+  usesProduct(template) {
+    return PRODUCT_PLACEHOLDER.test(template || "");
+  }
+  applyProduct(template, code) {
+    return template.replace(/{(?:jetbrainsProduct|product)}/g, code);
+  }
+  productLabel(code) {
+    if (code === "ask")
+      return t("set.preset.ask");
+    const p = JETBRAINS_PRODUCTS.find(([key]) => key === code);
+    return p ? p[1] : code;
+  }
+  // Pick a JetBrains IDE, then done(code). `allowAsk` adds an "Always ask" choice, so a
+  // fixed preset can be told to prompt for the IDE on every insert.
+  pickProduct(allowAsk, done) {
+    const items = JETBRAINS_PRODUCTS.map(([key, label]) => ({ key, label }));
+    if (allowAsk)
+      items.unshift({ key: "ask", label: t("set.preset.ask") });
+    new PresetPickerModal(this.app, items, (p) => done(p.key), t("modal.productPlaceholder")).open();
+  }
+  // Pick a preset; one whose template has a product placeholder then picks the IDE. Calls
+  // done(preset, code) — code is null without a product placeholder, else the IDE (or 'ask').
+  pickPreset(items, placeholder, done, allowAsk) {
     new PresetPickerModal(this.app, items, (p) => {
-      if (p.key !== "jetbrains")
+      if (!this.usesProduct(p.template))
         return done(p, null);
-      const ides = JETBRAINS_PRODUCTS.map(([key, label]) => ({ key, label }));
-      new PresetPickerModal(this.app, ides, (ide) => done(p, ide), t("modal.productPlaceholder")).open();
+      this.pickProduct(allowAsk, (code) => done(p, code));
     }, placeholder).open();
   }
-  // Run `run(template)` for a link action, prompting for the format only when `ask`
-  // is set (always-ask mode or the "…as" command); a JetBrains IDE bakes into the template.
+  // Always-ask mode picks the format (and IDE) per insert; a fixed preset still prompts for
+  // the IDE when the JetBrains-IDE setting is "Always ask".
   withFormat(ask, run) {
-    if (!ask) {
-      run(void 0);
+    if (ask) {
+      this.pickPreset(this.visiblePresets(), t("modal.formatPlaceholder"), (p, code) => {
+        this.recordRecentPreset(p.key);
+        run(code ? this.applyProduct(p.template, code) : p.template);
+      }, false);
       return;
     }
-    this.pickPreset(this.editorPresets(), t("modal.formatPlaceholder"), (p, ide) => run(ide ? p.template.replace("{product}", ide.key) : p.template));
+    const tpl = this.settings.uriTemplate;
+    if (this.usesProduct(tpl) && this.settings.jetbrainsProduct === "ask") {
+      this.pickProduct(false, (code) => run(this.applyProduct(tpl, code)));
+      return;
+    }
+    run(void 0);
   }
-  // Switch the default preset (or "Always ask") without opening settings; a chosen
-  // JetBrains IDE also updates the JetBrains IDE setting.
+  // Switch the default preset (or "Always ask") without opening settings; a product preset
+  // also sets the JetBrains-IDE setting, which may itself be "Always ask".
   switchPreset() {
-    const items = this.editorPresets().concat({ key: "ask", label: t("set.preset.ask") });
-    this.pickPreset(items, t("modal.switchPlaceholder"), async (p, ide) => {
+    const items = this.visiblePresets().concat({ key: "ask", label: t("set.preset.ask") });
+    this.pickPreset(items, t("modal.switchPlaceholder"), async (p, code) => {
       this.settings.askOnInsert = p.key === "ask";
       if (p.key !== "ask") {
         this.settings.uriTemplate = p.template;
-        if (ide)
-          this.settings.jetbrainsProduct = ide.key;
+        if (code)
+          this.settings.jetbrainsProduct = code;
+        this.recordRecentPreset(p.key);
       }
       await this.saveSettings();
-      new Notice(t("notice.editorSet", { name: ide ? ide.label : p.label }));
-    });
+      new Notice(t("notice.editorSet", { name: code ? this.productLabel(code) : p.label }));
+    }, true);
   }
   // Resolve {root} to the absolute code root: a copied link is usually pasted outside
   // the vault (a browser, a terminal), where the portable {root} token wouldn't resolve.
   // Inserted links keep {root} for note portability.
   copyLink(e, template) {
+    if (this.gitTemplateBlocked(e, template))
+      return;
     navigator.clipboard.writeText(this.fillRoot(this.buildLink(e, false, template)));
     new Notice(t("notice.copied"));
   }

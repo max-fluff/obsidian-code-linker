@@ -217,8 +217,9 @@ The selection commands and the link actions are also in the editor's right-click
 **Editor & links**
 | Setting | Default | What it does |
 | --- | --- | --- |
-| **Editor link preset** | Always ask | file:// / VS Code / JetBrains / one of your own editors, or **Always ask** to pick the format on every insert. See [Link targets and URI templates](#link-targets-and-uri-templates). |
-| **JetBrains IDE** | IntelliJ IDEA | Which JetBrains IDE the JetBrains preset opens (shown when it's selected). |
+| **Editor link preset** | Always ask | file:// / VS Code / JetBrains / GitHub or GitLab permalink / one of your own editors, or **Always ask** to pick the format on every insert. See [Link targets and URI templates](#link-targets-and-uri-templates). |
+| **JetBrains IDE** | IntelliJ IDEA | Which IDE a `{jetbrainsProduct}` template opens. Shown when the selected preset uses that placeholder; set it to **Always ask** to pick the IDE on every insert. |
+| **Shown in the picker** | GitHub/GitLab hidden unless your repo uses them | Foldable toggles for the built-in presets. Hiding one drops it from the pickers (not the default dropdown), and recently picked presets sort to the top. GitHub and GitLab start hidden; on first run each reveals itself only if the code root's git remote is on that host. Your own editors always show. |
 | **Your editors** | — | Foldable list of named URL templates you add; each appears in the preset dropdown. |
 | **Show editor in status bar** | off | Show the active preset in the status bar; click it to switch editors without opening settings. |
 | **Editor context menu** | on | Add the **Find and convert to link** and **Find and open code** items to the editor's right-click menu (plus **Copy code link** when you right-click an existing code link). |
@@ -251,12 +252,31 @@ The link target is a URI template with presets:
 
 - **file://** (default) — `file:///{root}/{path}`, opens in the OS default app. Uses the portable `{root}` token.
 - **VS Code** — `vscode://file/{root}/{path}:{line}`, using the portable `{root}` token.
-- **JetBrains** — `jetbrains://{product}/navigate/reference?project={project}&path={path}:{line}`, where `{product}` is the IDE you pick in the **JetBrains IDE** setting (IntelliJ IDEA, PyCharm, WebStorm, Rider, …).
+- **JetBrains** — `jetbrains://{jetbrainsProduct}/navigate/reference?project={project}&path={path}:{line}`, where `{jetbrainsProduct}` is the IDE you pick in the **JetBrains IDE** setting.
+- **GitHub permalink** — `{gitRemote}/blob/{gitSha}/{path}#L{line}`, a link to the exact commit, e.g. `https://github.com/org/repo/blob/<sha>/src/http-client.ts#L5`.
+- **GitLab permalink** — `{gitRemote}/-/blob/{gitSha}/{path}#L{line}` (GitLab serves blobs under `/-/blob`).
 - **Your editors** — add named presets of your own (Cursor, PyCharm, Sublime, …) using the placeholders below; they show up alongside the built-ins in the dropdown.
+
+The permalink presets read `.git` (no git binary) to fill `{gitRemote}`, `{gitSha}` and `{gitBranch}` at insert time, pinning the link to that commit. The repo is found by walking up from the file, so a vault spanning several repos links each file to its own. A file with no git remote is refused with a notice rather than left as a broken link.
 
 ### Placeholders
 
-`{abs}` (absolute path, URL-encoded), `{path}` (relative to code root), `{line}`, `{name}`, `{project}` (first path segment), `{product}` (the JetBrains IDE chosen in settings), `{root}` (see [Portable `{root}` links](#portable-root-links)).
+| Placeholder | What it becomes | Example |
+| --- | --- | --- |
+| `{path}` | File path **relative** to the code root (relative to the repo root in a permalink preset) | `src/http-client.ts` |
+| `{abs}` | Full **absolute** path on disk, URL-encoded | `C:/Users/you/code/src/http-client.ts` |
+| `{root}` | The absolute code root, filled in when the link opens — see [Portable `{root}` links](#portable-root-links) | `C:/Users/you/code` |
+| `{line}` | The declaration's line | `5` |
+| `{name}` | The symbol (or file) name | `HttpClient` |
+| `{project}` | First path segment (an IDE "project" guess) | `src` |
+| `{jetbrainsProduct}` | The chosen JetBrains IDE; any template using it gets the IDE picker | `webstorm` |
+| `{gitRemote}` | The repo's remote as an `https://` base | `https://github.com/org/repo` |
+| `{gitSha}` | The commit **at insert time** — frozen, so the link is a true permalink | `9dfc04d…` |
+| `{gitBranch}` | The branch at insert time (or the commit if HEAD is detached) | `main` |
+
+`{abs}` bakes a machine-specific absolute path into the note; `{root}/{path}` is the portable equivalent — the note keeps the relative `{path}` and each machine fills in its own `{root}`. Git placeholders are web URLs, so they're already portable; `{gitSha}` freezes the link to one commit, while `{gitBranch}` follows the branch.
+
+The older `{product}` name still resolves as `{jetbrainsProduct}`, so JetBrains templates from an earlier version keep working.
 
 The inserted markdown is always `[name](uri)`.
 
@@ -319,6 +339,7 @@ npm run build    # bundle src/ -> main.js
 - `actualize.js` — stale-link detection and the "Update code links" actions.
 - `api.js` — the public API mixed into the plugin prototype.
 - `constants.js` — defaults, URI presets, small string helpers.
+- `git.js` — reads `.git` to resolve a file's remote/commit/branch for the permalink presets.
 - `i18n.js` + `locales/` — interface strings (English and Russian).
 
 To deploy into a test vault on each build, create `esbuild.local.mjs` exporting `deployTargets` (a list of plugin folders to copy the build into). `node_modules/`, `package-lock.json` and `esbuild.local.mjs` are git-ignored.
