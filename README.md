@@ -32,6 +32,7 @@ The plugin ships as `main.js`, `manifest.json` and `styles.css`. The built-in la
 
 - [What it does](#what-it-does)
   - [Autocomplete as you type](#autocomplete-as-you-type)
+  - [Inline filters](#inline-filters)
   - [Picker commands](#picker-commands)
   - [Selection commands and the context menu](#selection-commands-and-the-context-menu)
   - [Portable `{root}` links](#portable-root-links)
@@ -55,11 +56,21 @@ The plugin ships as `main.js`, `manifest.json` and `styles.css`. The built-in la
 
 ### Autocomplete as you type
 
-An `EditorSuggest` autocomplete on a configurable trigger, with fuzzy / camelCase matching — `hc` finds `HttpClient`. It indexes file names plus type declarations, with their line numbers, so a suggestion drops you on the exact line. Suggestions are suppressed inside code blocks, inline code, frontmatter and existing links; table cells stay live (a pipe in the link is escaped automatically).
+An `EditorSuggest` autocomplete on a configurable trigger, with fuzzy / camelCase matching — `hc` finds `HttpClient`. It indexes file names plus type declarations, with their line numbers, so a suggestion drops you on the exact line. On a large index, [inline filters](#inline-filters) narrow the query. Suggestions are suppressed inside code blocks, inline code, frontmatter and existing links; table cells stay live (a pipe in the link is escaped automatically).
 
 <p align="center">
   <img src="docs/images/suggest.png" alt="The autocomplete dropdown after typing the trigger and a fuzzy query" width="560">
 </p>
+
+### Inline filters
+
+Prefix a query — in the trigger or an [embed](#inline-embeds) target — so a common name doesn't match every file. No spaces; filters join with `:`, a class with `.`:
+
+- `py:handler` — **by language** (a language id, an extension like `py`/`ts`/`cs`, or its name).
+- `def:handler` — **by kind** (any kind listed under a language in settings).
+- `Foo.bar` — **by class**: a `bar` in the same file as a `Foo`, so the class stands in for the file (co-location, not true nesting).
+
+They combine — `py:def:Foo.handler` — and a filter with no name (`py:`, `Foo.`) just lists what passes.
 
 ### Picker commands
 
@@ -126,7 +137,7 @@ HttpClient
   <img src="docs/images/embed.png" alt="Two rendered code-link embeds: a symbol resolved to its declaration with the line highlighted, and a titled line range" width="640">
 </p>
 
-- **A symbol name** (`HttpClient`) is resolved through the index to its declaration and shown with that line highlighted. Because it resolves on every render, it tracks the declaration as the code moves — the embed stays correct without you touching it.
+- **A symbol name** (`HttpClient`) is resolved through the index to its declaration and shown with that line highlighted. Because it resolves on every render, it tracks the declaration as the code moves — the embed stays correct without you touching it. When a name collides across files, prefix an [inline filter](#inline-filters) (`py:handler`) to resolve it without a path.
 - **A path with a line range** (`code-samples/http-client.ts:5-20`) shows exactly those lines.
 - **A path with a single line** (`code-samples/http-client.ts:42`) shows that line (add `context: N` to pad it).
 - **A bare path** (`code-samples/http-client.ts`) shows the file from the top (capped).

@@ -48,7 +48,7 @@ module.exports = {
   'embed.menu.open': 'Open code file',
   'embed.menu.refresh': 'Refresh embed',
   'embed.notFound': 'Code Linker: no code entry matches “{query}”',
-  'embed.ambiguous': 'Code Linker: {n} entries match “{query}” — use a path to pick one',
+  'embed.ambiguous': 'Code Linker: {n} entries match “{query}” — add a language/kind filter (e.g. py:) or a path to pick one',
   'embed.unreadable': 'Code Linker: can’t read {path}',
   'embed.truncated': 'Code Linker: showing the first {max} lines',
 

@@ -48,7 +48,7 @@ module.exports = {
   'embed.menu.open': 'Открыть файл кода',
   'embed.menu.refresh': 'Обновить embed',
   'embed.notFound': 'Code Linker: нет записи кода для «{query}»',
-  'embed.ambiguous': 'Code Linker: под «{query}» подходит записей: {n} — уточните путём',
+  'embed.ambiguous': 'Code Linker: под «{query}» подходит записей: {n} — уточните фильтром языка/типа (напр. py:) или путём',
   'embed.unreadable': 'Code Linker: не удалось прочитать {path}',
   'embed.truncated': 'Code Linker: показаны первые {max} строк',
 

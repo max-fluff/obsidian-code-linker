@@ -28,6 +28,7 @@ const PRODUCT_PLACEHOLDER = /{(?:jetbrainsProduct|product)}/;
 const MAX_PARSE_LINE_LENGTH = 2000;
 const { BUILTIN_LANGUAGES } = require('./builtin-languages');
 const { CodeIndexSuggest } = require('./suggest');
+const filter = require('./filter');
 const { HoverPreview } = require('./hover');
 const { registerEmbed } = require('./embed');
 const actualize = require('./actualize');
@@ -418,10 +419,12 @@ class CodeLinkerPlugin extends Plugin {
   setIndex(entries) {
     this.index = entries;
     this.byName = new Map();
+    this.kinds = new Set(); // kind labels present, for inline `kind:`/bare-token filters
     for (const e of entries) {
       const k = e.name.toLowerCase();
       const a = this.byName.get(k);
       if (a) a.push(e); else this.byName.set(k, [e]);
+      this.kinds.add(e.kind);
     }
   }
 
@@ -429,6 +432,32 @@ class CodeLinkerPlugin extends Plugin {
   // symbol resolves against.
   entriesByName(name) {
     return this.byName.get(String(name).toLowerCase()) || [];
+  }
+
+  // An inline filter token as a language id: its id, an extension without the dot
+  // (`py` -> `.py`), or its lower-cased name. Custom languages match for free.
+  resolveLangToken(token) {
+    const tok = String(token || '').toLowerCase();
+    const l = tok && this.languages.find((l) =>
+      l.id === tok || l.name.toLowerCase() === tok || l.extensions.includes('.' + tok));
+    return l ? l.id : null;
+  }
+
+  parseQuery(raw) {
+    return filter.parseQuery(raw, (t) => this.resolveLangToken(t), this.kinds);
+  }
+
+  // Whether an entry passes a parsed inline filter (the caller matches the name). A
+  // container must be declared in the same file — its class name stands in for the path.
+  entryPassesFilter(e, f) {
+    if (f.lang && e.lang !== f.lang) return false;
+    if (f.kind && e.kind !== f.kind) return false;
+    if (f.container) {
+      const v = this.fileCache.get(e.path);
+      const lc = f.container.toLowerCase();
+      if (!v || !v.entries.some((x) => x !== e && x.name.toLowerCase() === lc)) return false;
+    }
+    return true;
   }
 
   // Decode a link target and return { dec, cand }: the decoded string and the entries

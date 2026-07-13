@@ -100,12 +100,14 @@ function resolve(plugin, spec) {
   if (pr) return fromPath(plugin, spec, pr.path, pr.from, pr.to, pr.single ? pr.from : null);
   if (looksLikePath(target)) return fromPath(plugin, spec, target, null, null, null);
 
-  const matches = plugin.entriesByName(target);
+  // A "py:"/"def:" filter narrows a name that collides across files (a dotted "Foo.bar"
+  // is a path here — looksLikePath owns the dot — so class scope is suggestion-only).
+  const f = plugin.parseQuery(target);
+  const matches = plugin.entriesByName(f.name).filter((m) => plugin.entryPassesFilter(m, f));
   if (!matches.length) return { error: t('embed.notFound', { query: target }) };
-  // uniqueSymbolEntry is null when the name spans several files (genuinely ambiguous);
-  // a file + its own same-named declaration resolve to the declaration, not an error.
-  const e = plugin.uniqueSymbolEntry(target);
-  if (!e) return { error: t('embed.ambiguous', { n: new Set(matches.map((m) => m.path)).size, query: target }) };
+  const paths = new Set(matches.map((m) => m.path));
+  if (paths.size > 1) return { error: t('embed.ambiguous', { n: paths.size, query: target }) };
+  const e = matches.find((m) => m.kind !== 'file') || matches[0]; // declaration over file entry
   const ctx = intOr(spec.context, 0);
   const lr = splitRange(spec.lines);
   const from = Math.max(1, (lr ? lr.from : e.line) - ctx);

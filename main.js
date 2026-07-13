@@ -577,7 +577,7 @@ var require_suggest = __commonJS({
         if (i === -1)
           return null;
         const query = before.slice(i + s.trigger.length);
-        if (!/^[\w.]*$/.test(query))
+        if (!/^[\w.:]*$/.test(query))
           return null;
         if (query.length < Math.max(0, s.minChars))
           return null;
@@ -592,10 +592,12 @@ var require_suggest = __commonJS({
           return [];
         const max = this.plugin.settings.maxResults;
         const hidden = new Set(this.plugin.settings.disabledKinds || []);
-        if (!ctx.query) {
+        const f = this.plugin.parseQuery(ctx.query);
+        const pass = (e) => !hidden.has(e.lang + ":" + e.kind) && this.plugin.entryPassesFilter(e, f);
+        if (!f.name) {
           const out = [];
           for (const e of idx) {
-            if (hidden.has(e.lang + ":" + e.kind))
+            if (!pass(e))
               continue;
             out.push(e);
             if (out.length >= max)
@@ -603,10 +605,10 @@ var require_suggest = __commonJS({
           }
           return out;
         }
-        const match = prepareFuzzySearch(ctx.query);
+        const match = prepareFuzzySearch(f.name);
         const scored = [];
         for (const e of idx) {
-          if (hidden.has(e.lang + ":" + e.kind))
+          if (!pass(e))
             continue;
           const r = match(e.name);
           if (r)
@@ -636,6 +638,33 @@ var require_suggest = __commonJS({
       }
     };
     module2.exports = { CodeIndexSuggest: CodeIndexSuggest2 };
+  }
+});
+
+// src/filter.js
+var require_filter = __commonJS({
+  "src/filter.js"(exports2, module2) {
+    "use strict";
+    function parseQuery(raw, resolveLang, kinds) {
+      const f = { lang: null, kind: null, container: null, name: "" };
+      const parts = String(raw == null ? "" : raw).split(":");
+      let i = 0;
+      for (; i < parts.length - 1; i++) {
+        const id = resolveLang(parts[i]);
+        if (id)
+          f.lang = id;
+        else if (kinds.has(parts[i]))
+          f.kind = parts[i];
+        else
+          break;
+      }
+      const segs = parts.slice(i).join(":").split(".");
+      f.name = segs[segs.length - 1];
+      if (segs.length > 1 && segs[segs.length - 2])
+        f.container = segs[segs.length - 2];
+      return f;
+    }
+    module2.exports = { parseQuery };
   }
 });
 
@@ -890,7 +919,7 @@ var require_en = __commonJS({
       "embed.menu.open": "Open code file",
       "embed.menu.refresh": "Refresh embed",
       "embed.notFound": "Code Linker: no code entry matches \u201C{query}\u201D",
-      "embed.ambiguous": "Code Linker: {n} entries match \u201C{query}\u201D \u2014 use a path to pick one",
+      "embed.ambiguous": "Code Linker: {n} entries match \u201C{query}\u201D \u2014 add a language/kind filter (e.g. py:) or a path to pick one",
       "embed.unreadable": "Code Linker: can\u2019t read {path}",
       "embed.truncated": "Code Linker: showing the first {max} lines",
       // Status bar
@@ -1038,7 +1067,7 @@ var require_ru = __commonJS({
       "embed.menu.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0444\u0430\u0439\u043B \u043A\u043E\u0434\u0430",
       "embed.menu.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C embed",
       "embed.notFound": "Code Linker: \u043D\u0435\u0442 \u0437\u0430\u043F\u0438\u0441\u0438 \u043A\u043E\u0434\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
-      "embed.ambiguous": "Code Linker: \u043F\u043E\u0434 \xAB{query}\xBB \u043F\u043E\u0434\u0445\u043E\u0434\u0438\u0442 \u0437\u0430\u043F\u0438\u0441\u0435\u0439: {n} \u2014 \u0443\u0442\u043E\u0447\u043D\u0438\u0442\u0435 \u043F\u0443\u0442\u0451\u043C",
+      "embed.ambiguous": "Code Linker: \u043F\u043E\u0434 \xAB{query}\xBB \u043F\u043E\u0434\u0445\u043E\u0434\u0438\u0442 \u0437\u0430\u043F\u0438\u0441\u0435\u0439: {n} \u2014 \u0443\u0442\u043E\u0447\u043D\u0438\u0442\u0435 \u0444\u0438\u043B\u044C\u0442\u0440\u043E\u043C \u044F\u0437\u044B\u043A\u0430/\u0442\u0438\u043F\u0430 (\u043D\u0430\u043F\u0440. py:) \u0438\u043B\u0438 \u043F\u0443\u0442\u0451\u043C",
       "embed.unreadable": "Code Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C {path}",
       "embed.truncated": "Code Linker: \u043F\u043E\u043A\u0430\u0437\u0430\u043D\u044B \u043F\u0435\u0440\u0432\u044B\u0435 {max} \u0441\u0442\u0440\u043E\u043A",
       // Status bar
@@ -1287,12 +1316,14 @@ var require_embed = __commonJS({
         return fromPath(plugin, spec, pr.path, pr.from, pr.to, pr.single ? pr.from : null);
       if (looksLikePath(target))
         return fromPath(plugin, spec, target, null, null, null);
-      const matches = plugin.entriesByName(target);
+      const f = plugin.parseQuery(target);
+      const matches = plugin.entriesByName(f.name).filter((m) => plugin.entryPassesFilter(m, f));
       if (!matches.length)
         return { error: t2("embed.notFound", { query: target }) };
-      const e = plugin.uniqueSymbolEntry(target);
-      if (!e)
-        return { error: t2("embed.ambiguous", { n: new Set(matches.map((m) => m.path)).size, query: target }) };
+      const paths = new Set(matches.map((m) => m.path));
+      if (paths.size > 1)
+        return { error: t2("embed.ambiguous", { n: paths.size, query: target }) };
+      const e = matches.find((m) => m.kind !== "file") || matches[0];
       const ctx = intOr(spec.context, 0);
       const lr = splitRange(spec.lines);
       const from = Math.max(1, (lr ? lr.from : e.line) - ctx);
@@ -2055,6 +2086,7 @@ var PRODUCT_PLACEHOLDER = /{(?:jetbrainsProduct|product)}/;
 var MAX_PARSE_LINE_LENGTH = 2e3;
 var { BUILTIN_LANGUAGES } = require_builtin_languages();
 var { CodeIndexSuggest } = require_suggest();
+var filter = require_filter();
 var { HoverPreview } = require_hover();
 var { registerEmbed } = require_embed();
 var actualize = require_actualize();
@@ -2421,6 +2453,7 @@ var CodeLinkerPlugin = class extends Plugin {
   setIndex(entries) {
     this.index = entries;
     this.byName = /* @__PURE__ */ new Map();
+    this.kinds = /* @__PURE__ */ new Set();
     for (const e of entries) {
       const k = e.name.toLowerCase();
       const a = this.byName.get(k);
@@ -2428,12 +2461,38 @@ var CodeLinkerPlugin = class extends Plugin {
         a.push(e);
       else
         this.byName.set(k, [e]);
+      this.kinds.add(e.kind);
     }
   }
   // Index entries whose (lowercased) name equals `name` — the candidate set a bare
   // symbol resolves against.
   entriesByName(name) {
     return this.byName.get(String(name).toLowerCase()) || [];
+  }
+  // An inline filter token as a language id: its id, an extension without the dot
+  // (`py` -> `.py`), or its lower-cased name. Custom languages match for free.
+  resolveLangToken(token) {
+    const tok = String(token || "").toLowerCase();
+    const l = tok && this.languages.find((l2) => l2.id === tok || l2.name.toLowerCase() === tok || l2.extensions.includes("." + tok));
+    return l ? l.id : null;
+  }
+  parseQuery(raw) {
+    return filter.parseQuery(raw, (t2) => this.resolveLangToken(t2), this.kinds);
+  }
+  // Whether an entry passes a parsed inline filter (the caller matches the name). A
+  // container must be declared in the same file — its class name stands in for the path.
+  entryPassesFilter(e, f) {
+    if (f.lang && e.lang !== f.lang)
+      return false;
+    if (f.kind && e.kind !== f.kind)
+      return false;
+    if (f.container) {
+      const v = this.fileCache.get(e.path);
+      const lc = f.container.toLowerCase();
+      if (!v || !v.entries.some((x) => x !== e && x.name.toLowerCase() === lc))
+        return false;
+    }
+    return true;
   }
   // Decode a link target and return { dec, cand }: the decoded string and the entries
   // whose display name matches and whose path appears in it — the shared first step of

@@ -15,8 +15,9 @@ class CodeIndexSuggest extends EditorSuggest {
     const i = before.lastIndexOf(s.trigger);
     if (i === -1) return null;
     const query = before.slice(i + s.trigger.length);
-    // Stop once the typed text is no longer an identifier (space, etc.).
-    if (!/^[\w.]*$/.test(query)) return null;
+    // Stop once the typed text is no longer an identifier or an inline filter
+    // (a space, etc.). ":" joins the lang/kind qualifiers, "." the container scope.
+    if (!/^[\w.:]*$/.test(query)) return null;
     if (query.length < Math.max(0, s.minChars)) return null;
     // Don't suggest inside code, frontmatter or an existing link. Tables stay live.
     const off = editor.posToOffset(cursor);
@@ -29,11 +30,14 @@ class CodeIndexSuggest extends EditorSuggest {
     if (!idx || !idx.length) return [];
     const max = this.plugin.settings.maxResults;
     const hidden = new Set(this.plugin.settings.disabledKinds || []);
+    // Inline filter: "py:handler", "def:handler", "Foo.bar".
+    const f = this.plugin.parseQuery(ctx.query);
+    const pass = (e) => !hidden.has(e.lang + ':' + e.kind) && this.plugin.entryPassesFilter(e, f);
 
-    if (!ctx.query) {
+    if (!f.name) { // "py:", "Foo." or empty — list what passes the filter
       const out = [];
       for (const e of idx) {
-        if (hidden.has(e.lang + ':' + e.kind)) continue;
+        if (!pass(e)) continue;
         out.push(e);
         if (out.length >= max) break;
       }
@@ -41,10 +45,10 @@ class CodeIndexSuggest extends EditorSuggest {
     }
 
     // Fuzzy/subsequence match ranks camelCase abbreviations (ssis -> ServerSendInputsSystem).
-    const match = prepareFuzzySearch(ctx.query);
+    const match = prepareFuzzySearch(f.name);
     const scored = [];
     for (const e of idx) {
-      if (hidden.has(e.lang + ':' + e.kind)) continue;
+      if (!pass(e)) continue;
       const r = match(e.name);
       if (r) scored.push({ e, score: r.score });
     }
