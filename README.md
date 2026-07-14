@@ -332,10 +332,15 @@ else {
 
 The plugin is written as small CommonJS modules in `src/` and bundled into `main.js` by esbuild. `main.js` is generated — edit `src/` and rebuild rather than editing it directly.
 
+Generic code shared with the sibling Glossary Linker plugin lives in `src/shared/`, a git submodule of [obsidian-linker-shared](https://github.com/max-fluff/obsidian-linker-shared). Clone with `--recurse-submodules` so the build can find it:
+
 ```sh
+git clone --recurse-submodules https://github.com/max-fluff/obsidian-code-linker
 npm install      # once, installs esbuild
 npm run build    # bundle src/ -> main.js
 ```
+
+In an existing clone without the submodule, run `git submodule update --init` first.
 
 `src/` layout:
 
@@ -349,9 +354,10 @@ npm run build    # bundle src/ -> main.js
 - `render.js` — Prism-highlighted snippet rendering shared by hover and embeds.
 - `actualize.js` — stale-link detection and the "Update code links" actions.
 - `api.js` — the public API mixed into the plugin prototype.
-- `constants.js` — defaults, URI presets, small string helpers.
+- `constants.js` — defaults and URI presets.
 - `git.js` — reads `.git` to resolve a file's remote/commit/branch for the permalink presets.
-- `i18n.js` + `locales/` — interface strings (English and Russian).
+- `shared/` — git submodule shared with Glossary Linker: markdown helpers, the i18n engine, and the folder-list settings editor.
+- `locales/` — interface strings (English and Russian), fed to the shared i18n engine.
 
 To deploy into a test vault on each build, create `esbuild.local.mjs` exporting `deployTargets` (a list of plugin folders to copy the build into). `node_modules/`, `package-lock.json` and `esbuild.local.mjs` are git-ignored.
 
