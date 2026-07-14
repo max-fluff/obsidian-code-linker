@@ -71,6 +71,7 @@ module.exports = {
   'set.heading.suggestions': 'Подсказки и ссылки',
   'set.heading.hover': 'Превью при наведении',
   'set.heading.links': 'Ссылки',
+  'set.heading.maintenance': 'Обслуживание',
 
   // Settings — code index
   'set.codeRoot.name': 'Корень кода',
@@ -85,7 +86,8 @@ module.exports = {
   'set.maxFileSize.desc': 'Файлы крупнее индексируются только по имени, без разбора объявлений. 0 = без ограничения.',
   'set.skipFolders.name': 'Пропускаемые папки',
   'set.skipFolders.desc': 'Просто имя (node_modules) пропускается на любой глубине; путь со слэшем (src/generated) пропускает только эту папку относительно корня кода.',
-  'set.rebuild.name': 'Перестроить индекс сейчас',
+  'set.rebuild.name': 'Перестроить индекс кода',
+  'set.rebuild.desc': 'Пересканировать исходные папки сейчас.',
   'set.rebuild.button': 'Перестроить',
 
   // Settings — languages

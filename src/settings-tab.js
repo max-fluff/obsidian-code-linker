@@ -131,10 +131,6 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       warn.settingEl.addClass('mod-warning');
     }
 
-    new Setting(containerEl)
-      .setName(t('set.rebuild.name'))
-      .addButton((b) => b.setButtonText(t('set.rebuild.button')).onClick(() => this.plugin.rebuildIndex(true).then(() => this.display())));
-
     const root = this.plugin.codeRoot() || t('set.info.unknownRoot');
     containerEl.createEl('div', { cls: 'code-linker-note', text: t('set.info', { root, entries: plural('entry', this.plugin.index.length) }) });
 
@@ -342,6 +338,13 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       .setName(t('set.markStaleLinks.name'))
       .setDesc(t('set.markStaleLinks.desc'))
       .addToggle((c) => c.setValue(s.markStaleLinks).onChange(async (v) => { s.markStaleLinks = v; await save(false); }));
+
+    new Setting(containerEl).setName(t('set.heading.maintenance')).setHeading();
+
+    new Setting(containerEl)
+      .setName(t('set.rebuild.name'))
+      .setDesc(t('set.rebuild.desc'))
+      .addButton((b) => b.setButtonText(t('set.rebuild.button')).onClick(() => this.plugin.rebuildIndex(true).then(() => this.display())));
   }
 }
 
