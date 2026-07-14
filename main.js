@@ -943,12 +943,15 @@ var require_en = __commonJS({
       "set.codeRoot.name": "Code root",
       "set.codeRoot.desc": "Base folder the scan paths are relative to. Empty = the folder containing this vault.",
       "set.scanFolders.name": "Scan folders",
-      "set.scanFolders.desc": "One path per line, relative to the code root. These folders are scanned for source files. Leave empty to scan the whole code root.",
+      "set.scanFolders.desc": "Folders scanned for source files, relative to the code root. Leave empty to scan the whole code root.",
       "set.scanFolders.notFound": "\u26A0 Not found under the code root \u2014 {folders}",
+      "set.folderList.add": "Add folder\u2026",
+      "set.folderList.remove": "Remove",
+      "set.folderList.addAria": "Add",
       "set.maxFileSize.name": "Max file size (KB)",
       "set.maxFileSize.desc": "Files larger than this are indexed by name only, not parsed for declarations. 0 = no limit.",
       "set.skipFolders.name": "Skip folders",
-      "set.skipFolders.desc": "One per line. A bare name (node_modules) is skipped at any depth; a path with a slash (src/generated) skips only that folder, relative to the code root.",
+      "set.skipFolders.desc": "A bare name (node_modules) is skipped at any depth; a path with a slash (src/generated) skips only that folder, relative to the code root.",
       "set.rebuild.name": "Rebuild index now",
       "set.rebuild.button": "Rebuild",
       // Settings — languages
@@ -1091,12 +1094,15 @@ var require_ru = __commonJS({
       "set.codeRoot.name": "\u041A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430",
       "set.codeRoot.desc": "\u0411\u0430\u0437\u043E\u0432\u0430\u044F \u043F\u0430\u043F\u043A\u0430, \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0442\u043E\u0440\u043E\u0439 \u0437\u0430\u0434\u0430\u044E\u0442\u0441\u044F \u043F\u0443\u0442\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F. \u041F\u0443\u0441\u0442\u043E = \u043F\u0430\u043F\u043A\u0430, \u0441\u043E\u0434\u0435\u0440\u0436\u0430\u0449\u0430\u044F \u044D\u0442\u043E \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435.",
       "set.scanFolders.name": "\u041F\u0430\u043F\u043A\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F",
-      "set.scanFolders.desc": "\u041F\u043E \u043E\u0434\u043D\u043E\u043C\u0443 \u043F\u0443\u0442\u0438 \u0432 \u0441\u0442\u0440\u043E\u043A\u0435, \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F \u043A\u043E\u0434\u0430. \u042D\u0442\u0438 \u043F\u0430\u043F\u043A\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u043D\u0430 \u0438\u0441\u0445\u043E\u0434\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u044B. \u041E\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \u043F\u0443\u0441\u0442\u044B\u043C, \u0447\u0442\u043E\u0431\u044B \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0432\u0435\u0441\u044C \u043A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430.",
+      "set.scanFolders.desc": "\u041F\u0430\u043F\u043A\u0438, \u0441\u043A\u0430\u043D\u0438\u0440\u0443\u0435\u043C\u044B\u0435 \u043D\u0430 \u0438\u0441\u0445\u043E\u0434\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u044B, \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F \u043A\u043E\u0434\u0430. \u041E\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \u043F\u0443\u0441\u0442\u044B\u043C, \u0447\u0442\u043E\u0431\u044B \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0432\u0435\u0441\u044C \u043A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430.",
       "set.scanFolders.notFound": "\u26A0 \u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E \u0432 \u043A\u043E\u0440\u043D\u0435 \u043A\u043E\u0434\u0430 \u2014 {folders}",
+      "set.folderList.add": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0430\u043F\u043A\u0443\u2026",
+      "set.folderList.remove": "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
+      "set.folderList.addAria": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C",
       "set.maxFileSize.name": "\u041C\u0430\u043A\u0441. \u0440\u0430\u0437\u043C\u0435\u0440 \u0444\u0430\u0439\u043B\u0430 (\u041A\u0411)",
       "set.maxFileSize.desc": "\u0424\u0430\u0439\u043B\u044B \u043A\u0440\u0443\u043F\u043D\u0435\u0435 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E \u0438\u043C\u0435\u043D\u0438, \u0431\u0435\u0437 \u0440\u0430\u0437\u0431\u043E\u0440\u0430 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u0439. 0 = \u0431\u0435\u0437 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u044F.",
       "set.skipFolders.name": "\u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u043C\u044B\u0435 \u043F\u0430\u043F\u043A\u0438",
-      "set.skipFolders.desc": "\u041F\u043E \u043E\u0434\u043D\u043E\u0439 \u0437\u0430\u043F\u0438\u0441\u0438 \u0432 \u0441\u0442\u0440\u043E\u043A\u0435. \u041F\u0440\u043E\u0441\u0442\u043E \u0438\u043C\u044F (node_modules) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u043B\u044E\u0431\u043E\u0439 \u0433\u043B\u0443\u0431\u0438\u043D\u0435; \u043F\u0443\u0442\u044C \u0441\u043E \u0441\u043B\u044D\u0448\u0435\u043C (src/generated) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u0443 \u043F\u0430\u043F\u043A\u0443 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F \u043A\u043E\u0434\u0430.",
+      "set.skipFolders.desc": "\u041F\u0440\u043E\u0441\u0442\u043E \u0438\u043C\u044F (node_modules) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u043B\u044E\u0431\u043E\u0439 \u0433\u043B\u0443\u0431\u0438\u043D\u0435; \u043F\u0443\u0442\u044C \u0441\u043E \u0441\u043B\u044D\u0448\u0435\u043C (src/generated) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u0443 \u043F\u0430\u043F\u043A\u0443 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F \u043A\u043E\u0434\u0430.",
       "set.rebuild.name": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u0441\u0435\u0439\u0447\u0430\u0441",
       "set.rebuild.button": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C",
       // Settings — languages
@@ -1657,13 +1663,143 @@ var require_modal = __commonJS({
   }
 });
 
+// src/folder-suggest.js
+var require_folder_suggest = __commonJS({
+  "src/folder-suggest.js"(exports2, module2) {
+    "use strict";
+    var obsidian = require("obsidian");
+    var fs2 = require("fs");
+    var nodePath2 = require("path");
+    var { AbstractInputSuggest } = obsidian;
+    var FolderSuggest = class extends AbstractInputSuggest {
+      constructor(app, inputEl, getRoot, onSelect, getSeed) {
+        super(app, inputEl);
+        this.inputEl = inputEl;
+        this.getRoot = getRoot;
+        this.onSelect = onSelect;
+        this.getSeed = getSeed;
+      }
+      // Immediate subdirectory names of an absolute dir, or [] if it can't be read.
+      subdirs(dir) {
+        try {
+          return fs2.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+        } catch (e) {
+          return [];
+        }
+      }
+      getSuggestions(query) {
+        const base = this.getRoot ? this.getRoot() : "";
+        const q = query.replace(/\\/g, "/");
+        const slash = q.lastIndexOf("/");
+        const partial = (slash === -1 ? q : q.slice(slash + 1)).toLowerCase();
+        const head = slash === -1 ? "" : q.slice(0, slash);
+        let scanDir, prefix;
+        if (base) {
+          scanDir = nodePath2.join(base, head);
+          prefix = head;
+        } else if (slash === -1) {
+          scanDir = this.getSeed ? this.getSeed() : "";
+          prefix = scanDir;
+        } else {
+          scanDir = head.endsWith(":") ? head + "/" : head;
+          prefix = head;
+        }
+        if (!scanDir)
+          return [];
+        const stem = prefix.replace(/\/+$/, "");
+        return this.subdirs(scanDir).filter((name) => name.toLowerCase().includes(partial)).map((name) => stem ? stem + "/" + name : name).sort().slice(0, 50);
+      }
+      renderSuggestion(path, el) {
+        el.setText(path);
+      }
+      selectSuggestion(path) {
+        if (this.onSelect) {
+          this.onSelect(path);
+          this.setValue("");
+          this.close();
+          return;
+        }
+        this.setValue(path);
+        this.inputEl.trigger("input");
+        this.close();
+      }
+    };
+    var folderSuggestAvailable = () => typeof AbstractInputSuggest === "function";
+    module2.exports = { FolderSuggest, folderSuggestAvailable };
+  }
+});
+
+// src/folder-list.js
+var require_folder_list = __commonJS({
+  "src/folder-list.js"(exports2, module2) {
+    "use strict";
+    var { Setting, setIcon } = require("obsidian");
+    function renderFolderList(containerEl, opts) {
+      const cls = opts.cls;
+      const norm = opts.normalize || ((x) => x.trim());
+      const read = () => (opts.get() || "").split("\n").map((x) => x.trim()).filter(Boolean);
+      new Setting(containerEl).setName(opts.name).setDesc(opts.desc);
+      const rowsEl = containerEl.createDiv({ cls: `${cls}-folder-rows` });
+      const addEl = containerEl.createDiv({ cls: `${cls}-folder-add` });
+      const commit = async (next) => {
+        const seen = /* @__PURE__ */ new Set();
+        const clean = [];
+        for (const p of next) {
+          const n = norm(p);
+          if (n && !seen.has(n)) {
+            seen.add(n);
+            clean.push(n);
+          }
+        }
+        await opts.set(clean.join("\n"));
+        draw();
+      };
+      const draw = () => {
+        rowsEl.empty();
+        read().forEach((path, i) => {
+          const row = new Setting(rowsEl).setName(path);
+          row.settingEl.addClass(`${cls}-folder-row`);
+          row.addExtraButton((b) => b.setIcon("x").setTooltip(opts.removeLabel || "").onClick(() => {
+            const next = read();
+            next.splice(i, 1);
+            commit(next);
+          }));
+        });
+      };
+      const input = addEl.createEl("input", { type: "text", cls: `${cls}-folder-input`, attr: { placeholder: opts.placeholder || "" } });
+      const addBtn = addEl.createEl("button", { cls: `${cls}-folder-addbtn`, attr: { "aria-label": opts.addLabel || "" } });
+      setIcon(addBtn, "plus");
+      const add = (raw) => {
+        if (norm(raw))
+          commit([...read(), raw]);
+        input.value = "";
+        input.focus();
+      };
+      if (opts.attachSuggest)
+        opts.attachSuggest(input, add);
+      addBtn.addEventListener("click", () => add(input.value));
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          add(input.value);
+        }
+      });
+      draw();
+    }
+    module2.exports = { renderFolderList };
+  }
+});
+
 // src/settings-tab.js
 var require_settings_tab = __commonJS({
   "src/settings-tab.js"(exports2, module2) {
     "use strict";
     var { PluginSettingTab, Setting } = require("obsidian");
     var { PRESETS: PRESETS2, JETBRAINS_PRODUCTS: JETBRAINS_PRODUCTS2 } = require_constants();
+    var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest();
+    var { renderFolderList } = require_folder_list();
     var { t: t2, plural: plural2 } = require_i18n();
+    var normFolder = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "").trim();
     var CodeLinkerSettingTab2 = class extends PluginSettingTab {
       constructor(app, plugin) {
         super(app, plugin);
@@ -1682,6 +1818,10 @@ var require_settings_tab = __commonJS({
       selectedUsesProduct() {
         const p = this.plugin.editorPresets().find((x) => x.key === this.selectedEditor());
         return !!p && this.plugin.usesProduct(p.template);
+      }
+      // Chevron toggle shared by the foldable sections (languages, presets, editors).
+      foldButton(setting, open, onToggle) {
+        setting.addExtraButton((b) => b.setIcon(open ? "chevron-up" : "chevron-down").setTooltip(open ? t2("set.editors.collapse") : t2("set.editors.expand")).onClick(onToggle));
       }
       // Update one editor's dropdown label as its name is typed, sparing a full re-render.
       refreshPresetOption(dropdown, i, name) {
@@ -1733,24 +1873,35 @@ var require_settings_tab = __commonJS({
           return c;
         };
         new Setting(containerEl).setName(t2("set.heading.index")).setHeading();
-        new Setting(containerEl).setName(t2("set.codeRoot.name")).setDesc(t2("set.codeRoot.desc")).addText((c) => wide(c).setPlaceholder(this.plugin.codeRoot()).setValue(s.codeRoot).onChange(async (v) => {
-          s.codeRoot = v.trim();
-          await save(false);
-        }));
-        const area = (setting, get, set) => setting.addTextArea((c) => {
-          c.inputEl.rows = 4;
-          c.inputEl.addClass("code-linker-input");
-          c.setValue(get()).onChange(async (v) => {
-            set(v);
+        new Setting(containerEl).setName(t2("set.codeRoot.name")).setDesc(t2("set.codeRoot.desc")).addText((c) => {
+          wide(c).setPlaceholder(this.plugin.codeRoot()).setValue(s.codeRoot).onChange(async (v) => {
+            s.codeRoot = v.trim();
             await save(false);
           });
+          if (folderSuggestAvailable())
+            new FolderSuggest(this.app, c.inputEl, () => "", null, () => this.plugin.codeRoot());
         });
-        area(new Setting(containerEl).setName(t2("set.scanFolders.name")).setDesc(t2("set.scanFolders.desc")), () => s.scanRoots, (v) => s.scanRoots = v);
+        const folderList = (name, desc, key) => renderFolderList(containerEl, {
+          cls: "code-linker",
+          name,
+          desc,
+          get: () => s[key],
+          set: async (v) => {
+            s[key] = v;
+            await save(false);
+          },
+          normalize: normFolder,
+          attachSuggest: folderSuggestAvailable() ? (inputEl, onPick) => new FolderSuggest(this.app, inputEl, () => this.plugin.codeRoot(), onPick) : null,
+          placeholder: t2("set.folderList.add"),
+          removeLabel: t2("set.folderList.remove"),
+          addLabel: t2("set.folderList.addAria")
+        });
+        folderList(t2("set.scanFolders.name"), t2("set.scanFolders.desc"), "scanRoots");
         const missing = this.plugin.scanRootStatus().filter((x) => !x.exists).map((x) => x.rel);
         if (missing.length) {
-          containerEl.createEl("div", { cls: "code-linker-section-desc", text: t2("set.scanFolders.notFound", { folders: missing.join(", ") }) });
+          containerEl.createEl("div", { cls: "code-linker-note is-error", text: t2("set.scanFolders.notFound", { folders: missing.join(", ") }) });
         }
-        area(new Setting(containerEl).setName(t2("set.skipFolders.name")).setDesc(t2("set.skipFolders.desc")), () => s.skipDirs, (v) => s.skipDirs = v);
+        folderList(t2("set.skipFolders.name"), t2("set.skipFolders.desc"), "skipDirs");
         new Setting(containerEl).setName(t2("set.maxFileSize.name")).setDesc(t2("set.maxFileSize.desc")).addText((c) => {
           c.inputEl.type = "number";
           c.setValue(String(s.maxFileSizeKb)).onChange(async (v) => {
@@ -1773,16 +1924,18 @@ var require_settings_tab = __commonJS({
           warn.settingEl.addClass("mod-warning");
         }
         new Setting(containerEl).setName(t2("set.rebuild.name")).addButton((b) => b.setButtonText(t2("set.rebuild.button")).onClick(() => this.plugin.rebuildIndex(true).then(() => this.display())));
+        const root = this.plugin.codeRoot() || t2("set.info.unknownRoot");
+        containerEl.createEl("div", { cls: "code-linker-note", text: t2("set.info", { root, entries: plural2("entry", this.plugin.index.length) }) });
         if (this.showLanguages === void 0)
           this.showLanguages = false;
         const enabled = new Set(s.enabledLanguages || []);
         const enabledCount = this.plugin.languages.filter((l) => enabled.has(l.id)).length;
-        new Setting(containerEl).setName(t2("set.heading.languages")).setHeading().addExtraButton((b) => b.setIcon(this.showLanguages ? "chevron-up" : "chevron-down").setTooltip(this.showLanguages ? t2("set.editors.collapse") : t2("set.editors.expand")).onClick(() => {
+        const langHeading = new Setting(containerEl).setName(t2("set.heading.languages")).setDesc(t2("set.languages.desc", { enabled: enabledCount, total: this.plugin.languages.length })).setHeading();
+        this.foldButton(langHeading, this.showLanguages, () => {
           this.showLanguages = !this.showLanguages;
           this.display();
-        }));
+        });
         if (this.showLanguages) {
-          containerEl.createEl("div", { cls: "setting-item-description", text: t2("set.languages.desc", { enabled: enabledCount, total: this.plugin.languages.length }) });
           for (const lang of this.plugin.languages) {
             const on = enabled.has(lang.id);
             const open = this.expanded.has(lang.id);
@@ -1817,8 +1970,7 @@ var require_settings_tab = __commonJS({
           const row = new Setting(containerEl).setName(bad.id).setDesc(t2("set.lang.invalid", { error: bad.error }));
           row.settingEl.addClass("mod-warning");
         }
-        new Setting(containerEl).setName(t2("set.heading.customLanguages")).setHeading();
-        containerEl.createEl("div", { cls: "setting-item-description", text: t2("set.customLanguages.desc") });
+        new Setting(containerEl).setName(t2("set.heading.customLanguages")).setDesc(t2("set.customLanguages.desc")).setHeading();
         const langPath = this.plugin.languagesFilePath();
         const langFile = langPath ? this.app.vault.getAbstractFileByPath(langPath) : null;
         const langSetting = new Setting(containerEl).setName(t2("set.languagesFile.name")).setDesc(t2("set.languagesFile.desc")).addText((c) => {
@@ -1898,12 +2050,13 @@ var require_settings_tab = __commonJS({
           this.showPresets = false;
         const builtins = this.plugin.editorPresets().filter((p) => p.builtin);
         const hiddenPresets = new Set(s.hiddenPresets || []);
-        new Setting(containerEl).setName(t2("set.shownPresets.name")).setDesc(t2("set.shownPresets.count", { shown: builtins.length - hiddenPresets.size, total: builtins.length })).addExtraButton((b) => b.setIcon(this.showPresets ? "chevron-up" : "chevron-down").setTooltip(this.showPresets ? t2("set.editors.collapse") : t2("set.editors.expand")).onClick(() => {
+        const presetHeading = new Setting(containerEl).setName(t2("set.shownPresets.name")).setDesc(t2("set.shownPresets.count", { shown: builtins.length - hiddenPresets.size, total: builtins.length }));
+        this.foldButton(presetHeading, this.showPresets, () => {
           this.showPresets = !this.showPresets;
           this.display();
-        }));
+        });
         if (this.showPresets) {
-          containerEl.createEl("div", { cls: "setting-item-description", text: t2("set.shownPresets.desc") });
+          containerEl.createEl("div", { cls: "code-linker-note", text: t2("set.shownPresets.desc") });
           for (const p of builtins) {
             const row = new Setting(containerEl).setName(p.label).addToggle((c) => c.setValue(!hiddenPresets.has(p.key)).onChange(async (v) => {
               const set = new Set(s.hiddenPresets || []);
@@ -1920,10 +2073,11 @@ var require_settings_tab = __commonJS({
         if (this.showEditors === void 0)
           this.showEditors = false;
         const editors = s.editors || [];
-        new Setting(containerEl).setName(t2("set.editors.name")).setDesc(t2("set.editors.count", { n: editors.length })).addExtraButton((b) => b.setIcon(this.showEditors ? "chevron-up" : "chevron-down").setTooltip(this.showEditors ? t2("set.editors.collapse") : t2("set.editors.expand")).onClick(() => {
+        const editorsHeading = new Setting(containerEl).setName(t2("set.editors.name")).setDesc(t2("set.editors.count", { n: editors.length }));
+        this.foldButton(editorsHeading, this.showEditors, () => {
           this.showEditors = !this.showEditors;
           this.display();
-        }));
+        });
         if (this.showEditors) {
           editors.forEach((ed, i) => {
             const row = new Setting(containerEl).addText((c) => {
@@ -1993,8 +2147,6 @@ var require_settings_tab = __commonJS({
           s.markStaleLinks = v;
           await save(false);
         }));
-        const root = this.plugin.codeRoot() || t2("set.info.unknownRoot");
-        containerEl.createEl("div", { cls: "setting-item-description", text: t2("set.info", { root, entries: plural2("entry", this.plugin.index.length) }) });
       }
     };
     module2.exports = { CodeLinkerSettingTab: CodeLinkerSettingTab2 };

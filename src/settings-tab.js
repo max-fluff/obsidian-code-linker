@@ -2,7 +2,12 @@
 
 const { PluginSettingTab, Setting } = require('obsidian');
 const { PRESETS, JETBRAINS_PRODUCTS } = require('./constants');
+const { FolderSuggest, folderSuggestAvailable } = require('./folder-suggest');
+const { renderFolderList } = require('./folder-list');
 const { t, plural } = require('./i18n');
+
+// Path tidy for the folder-list rows: backslashes to slashes, no trailing slash.
+const normFolder = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').trim();
 
 class CodeLinkerSettingTab extends PluginSettingTab {
   constructor(app, plugin) { super(app, plugin); this.plugin = plugin; this.expanded = new Set(); }
@@ -19,6 +24,13 @@ class CodeLinkerSettingTab extends PluginSettingTab {
   selectedUsesProduct() {
     const p = this.plugin.editorPresets().find((x) => x.key === this.selectedEditor());
     return !!p && this.plugin.usesProduct(p.template);
+  }
+
+  // Chevron toggle shared by the foldable sections (languages, presets, editors).
+  foldButton(setting, open, onToggle) {
+    setting.addExtraButton((b) => b.setIcon(open ? 'chevron-up' : 'chevron-down')
+      .setTooltip(open ? t('set.editors.collapse') : t('set.editors.expand'))
+      .onClick(onToggle));
   }
 
   // Update one editor's dropdown label as its name is typed, sparing a full re-render.
@@ -71,20 +83,35 @@ class CodeLinkerSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName(t('set.codeRoot.name'))
       .setDesc(t('set.codeRoot.desc'))
-      .addText((c) => wide(c).setPlaceholder(this.plugin.codeRoot()).setValue(s.codeRoot).onChange(async (v) => { s.codeRoot = v.trim(); await save(false); }));
+      .addText((c) => {
+        wide(c).setPlaceholder(this.plugin.codeRoot()).setValue(s.codeRoot).onChange(async (v) => { s.codeRoot = v.trim(); await save(false); });
+        // Absolute-path completer seeded at the current default, so an empty field
+        // still lists folders around the vault instead of nothing.
+        if (folderSuggestAvailable()) new FolderSuggest(this.app, c.inputEl, () => '', null, () => this.plugin.codeRoot());
+      });
 
-    const area = (setting, get, set) => setting.addTextArea((c) => {
-      c.inputEl.rows = 4;
-      c.inputEl.addClass('code-linker-input');
-      c.setValue(get()).onChange(async (v) => { set(v); await save(false); });
+    // Scan/skip paths are code-root-relative, so their autocomplete is rooted there.
+    const folderList = (name, desc, key) => renderFolderList(containerEl, {
+      cls: 'code-linker',
+      name,
+      desc,
+      get: () => s[key],
+      set: async (v) => { s[key] = v; await save(false); },
+      normalize: normFolder,
+      attachSuggest: folderSuggestAvailable()
+        ? (inputEl, onPick) => new FolderSuggest(this.app, inputEl, () => this.plugin.codeRoot(), onPick)
+        : null,
+      placeholder: t('set.folderList.add'),
+      removeLabel: t('set.folderList.remove'),
+      addLabel: t('set.folderList.addAria'),
     });
 
-    area(new Setting(containerEl).setName(t('set.scanFolders.name')).setDesc(t('set.scanFolders.desc')), () => s.scanRoots, (v) => (s.scanRoots = v));
+    folderList(t('set.scanFolders.name'), t('set.scanFolders.desc'), 'scanRoots');
     const missing = this.plugin.scanRootStatus().filter((x) => !x.exists).map((x) => x.rel);
     if (missing.length) {
-      containerEl.createEl('div', { cls: 'code-linker-section-desc', text: t('set.scanFolders.notFound', { folders: missing.join(', ') }) });
+      containerEl.createEl('div', { cls: 'code-linker-note is-error', text: t('set.scanFolders.notFound', { folders: missing.join(', ') }) });
     }
-    area(new Setting(containerEl).setName(t('set.skipFolders.name')).setDesc(t('set.skipFolders.desc')), () => s.skipDirs, (v) => (s.skipDirs = v));
+    folderList(t('set.skipFolders.name'), t('set.skipFolders.desc'), 'skipDirs');
 
     new Setting(containerEl).setName(t('set.maxFileSize.name')).setDesc(t('set.maxFileSize.desc')).addText((c) => {
       c.inputEl.type = 'number';
@@ -108,20 +135,20 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       .setName(t('set.rebuild.name'))
       .addButton((b) => b.setButtonText(t('set.rebuild.button')).onClick(() => this.plugin.rebuildIndex(true).then(() => this.display())));
 
+    const root = this.plugin.codeRoot() || t('set.info.unknownRoot');
+    containerEl.createEl('div', { cls: 'code-linker-note', text: t('set.info', { root, entries: plural('entry', this.plugin.index.length) }) });
+
     // --- Languages ----------------------------------------------------------
     if (this.showLanguages === undefined) this.showLanguages = false;
     const enabled = new Set(s.enabledLanguages || []);
     const enabledCount = this.plugin.languages.filter((l) => enabled.has(l.id)).length;
-    new Setting(containerEl)
+    const langHeading = new Setting(containerEl)
       .setName(t('set.heading.languages'))
-      .setHeading()
-      .addExtraButton((b) => b.setIcon(this.showLanguages ? 'chevron-up' : 'chevron-down')
-        .setTooltip(this.showLanguages ? t('set.editors.collapse') : t('set.editors.expand'))
-        .onClick(() => { this.showLanguages = !this.showLanguages; this.display(); }));
+      .setDesc(t('set.languages.desc', { enabled: enabledCount, total: this.plugin.languages.length }))
+      .setHeading();
+    this.foldButton(langHeading, this.showLanguages, () => { this.showLanguages = !this.showLanguages; this.display(); });
 
     if (this.showLanguages) {
-      containerEl.createEl('div', { cls: 'setting-item-description', text: t('set.languages.desc', { enabled: enabledCount, total: this.plugin.languages.length }) });
-
       for (const lang of this.plugin.languages) {
         const on = enabled.has(lang.id);
         const open = this.expanded.has(lang.id);
@@ -156,8 +183,7 @@ class CodeLinkerSettingTab extends PluginSettingTab {
     }
 
     // --- Custom languages ---------------------------------------------------
-    new Setting(containerEl).setName(t('set.heading.customLanguages')).setHeading();
-    containerEl.createEl('div', { cls: 'setting-item-description', text: t('set.customLanguages.desc') });
+    new Setting(containerEl).setName(t('set.heading.customLanguages')).setDesc(t('set.customLanguages.desc')).setHeading();
 
     const langPath = this.plugin.languagesFilePath();
     const langFile = langPath ? this.app.vault.getAbstractFileByPath(langPath) : null;
@@ -239,15 +265,13 @@ class CodeLinkerSettingTab extends PluginSettingTab {
     if (this.showPresets === undefined) this.showPresets = false;
     const builtins = this.plugin.editorPresets().filter((p) => p.builtin);
     const hiddenPresets = new Set(s.hiddenPresets || []);
-    new Setting(containerEl)
+    const presetHeading = new Setting(containerEl)
       .setName(t('set.shownPresets.name'))
-      .setDesc(t('set.shownPresets.count', { shown: builtins.length - hiddenPresets.size, total: builtins.length }))
-      .addExtraButton((b) => b.setIcon(this.showPresets ? 'chevron-up' : 'chevron-down')
-        .setTooltip(this.showPresets ? t('set.editors.collapse') : t('set.editors.expand'))
-        .onClick(() => { this.showPresets = !this.showPresets; this.display(); }));
+      .setDesc(t('set.shownPresets.count', { shown: builtins.length - hiddenPresets.size, total: builtins.length }));
+    this.foldButton(presetHeading, this.showPresets, () => { this.showPresets = !this.showPresets; this.display(); });
 
     if (this.showPresets) {
-      containerEl.createEl('div', { cls: 'setting-item-description', text: t('set.shownPresets.desc') });
+      containerEl.createEl('div', { cls: 'code-linker-note', text: t('set.shownPresets.desc') });
       for (const p of builtins) {
         const row = new Setting(containerEl).setName(p.label)
           .addToggle((c) => c.setValue(!hiddenPresets.has(p.key)).onChange(async (v) => {
@@ -263,12 +287,10 @@ class CodeLinkerSettingTab extends PluginSettingTab {
     // Your editors — foldable list of named URL templates that join the dropdown above.
     if (this.showEditors === undefined) this.showEditors = false;
     const editors = s.editors || [];
-    new Setting(containerEl)
+    const editorsHeading = new Setting(containerEl)
       .setName(t('set.editors.name'))
-      .setDesc(t('set.editors.count', { n: editors.length }))
-      .addExtraButton((b) => b.setIcon(this.showEditors ? 'chevron-up' : 'chevron-down')
-        .setTooltip(this.showEditors ? t('set.editors.collapse') : t('set.editors.expand'))
-        .onClick(() => { this.showEditors = !this.showEditors; this.display(); }));
+      .setDesc(t('set.editors.count', { n: editors.length }));
+    this.foldButton(editorsHeading, this.showEditors, () => { this.showEditors = !this.showEditors; this.display(); });
 
     if (this.showEditors) {
       editors.forEach((ed, i) => {
@@ -320,9 +342,6 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       .setName(t('set.markStaleLinks.name'))
       .setDesc(t('set.markStaleLinks.desc'))
       .addToggle((c) => c.setValue(s.markStaleLinks).onChange(async (v) => { s.markStaleLinks = v; await save(false); }));
-
-    const root = this.plugin.codeRoot() || t('set.info.unknownRoot');
-    containerEl.createEl('div', { cls: 'setting-item-description', text: t('set.info', { root, entries: plural('entry', this.plugin.index.length) }) });
   }
 }
 

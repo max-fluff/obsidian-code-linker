@@ -65,12 +65,15 @@ settings:
   width: 100%;
 }
 
-/* Inline status under the scan-folders field, shown only when a configured
-   folder is missing — a light error line instead of a full warning row. */
-.code-linker-section-desc {
-  color: var(--text-error);
+/* Muted helper / status line under a control or section — one class for every such
+   note in the pane. .is-error tints it for a missing folder or other problem. */
+.code-linker-note {
+  color: var(--text-muted);
   font-size: var(--font-ui-small);
-  margin: -6px 0 14px;
+  margin: 4px 0 14px;
+}
+.code-linker-note.is-error {
+  color: var(--text-error);
 }
 
 /* User editor preset rows: name + template + remove on one line, wrapping to
@@ -233,13 +236,52 @@ settings:
 .code-linker-stale { border-bottom-color: var(--code-linker-stale-color, var(--text-warning)); }
 .code-linker-broken { border-bottom-color: var(--code-linker-broken-color, var(--text-error)); }
 
-/* Per-language searchable-entity rows, indented under their language toggle. */
-.code-linker-kind-row {
+/* Nested sub-rows — searchable kinds under a language, and chosen folders under a
+   folder list — share one indent and compact height so the pane reads as one list
+   style. The kind rule is unqualified so it also indents the plain rebuild hint. */
+.code-linker-kind-row,
+.code-linker-folder-row {
   margin-left: 1.5em;
-  border-left: 2px solid var(--background-modifier-border);
   padding-left: 0.75em;
+  border-left: 2px solid var(--background-modifier-border);
+}
+.code-linker-kind-row.setting-item,
+.code-linker-folder-row.setting-item {
+  border-top: 0;
+  padding: 4px 6px 4px 0.75em;
 }
 .code-linker-kind-row .setting-item-name {
   font-size: 0.9em;
   opacity: 0.85;
+}
+
+/* Folder-set editor: a full-width input with autocomplete and an add button below
+   the chosen-folder rows. */
+.code-linker-folder-rows:not(:empty) {
+  margin: 6px 0;
+}
+.code-linker-folder-row .setting-item-name {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
+}
+.code-linker-folder-add {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 18px 1.5em;
+}
+.code-linker-folder-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.code-linker-folder-addbtn {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.code-linker-folder-addbtn svg {
+  width: 16px;
+  height: 16px;
 }
