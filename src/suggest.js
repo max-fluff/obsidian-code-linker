@@ -1,7 +1,7 @@
 'use strict';
 
 const { EditorSuggest, prepareFuzzySearch } = require('obsidian');
-const { isProtected, inTableCell } = require('./constants');
+const { isProtected, inTableCell } = require('./shared/markdown');
 
 class CodeIndexSuggest extends EditorSuggest {
   constructor(app, plugin) {

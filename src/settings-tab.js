@@ -3,8 +3,8 @@
 const { PluginSettingTab, Setting } = require('obsidian');
 const { PRESETS, JETBRAINS_PRODUCTS } = require('./constants');
 const { FolderSuggest, folderSuggestAvailable } = require('./folder-suggest');
-const { renderFolderList } = require('./folder-list');
-const { t, plural } = require('./i18n');
+const { renderFolderList } = require('./shared/folder-list');
+const { t, plural } = require('./shared/i18n');
 
 // Path tidy for the folder-list rows: backslashes to slashes, no trailing slash.
 const normFolder = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').trim();

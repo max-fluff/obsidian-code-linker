@@ -9,8 +9,8 @@ const { Notice, MarkdownView } = require('obsidian');
 const { ViewPlugin, Decoration } = require('@codemirror/view');
 const { RangeSetBuilder, StateEffect } = require('@codemirror/state');
 const { syntaxTree } = require('@codemirror/language');
-const { linkRegex, isFenceLine, inInlineCode } = require('./constants');
-const { t } = require('./i18n');
+const { linkRegex, isFenceLine, inInlineCode } = require('./shared/markdown');
+const { t } = require('./shared/i18n');
 
 // The line lives as the last :<digits> before the end; relative code paths carry no
 // colon, so it's unambiguous. Not global, so replace() only touches that one number.

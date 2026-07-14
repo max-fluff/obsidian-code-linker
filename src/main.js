@@ -15,7 +15,8 @@ const fsp = fs.promises;
 const readline = require('readline');
 const nodePath = require('path');
 
-const { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, splitLines, parseSkip, underSkip, pathInTarget, inTableCell, inCode, inLink, linkRegex } = require('./constants');
+const { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, parseSkip, underSkip, pathInTarget } = require('./constants');
+const { splitLines, inTableCell, inCode, inLink, linkRegex } = require('./shared/markdown');
 const { resolveGit, resolveGitDir } = require('./git');
 
 // Templates whose {gitRemote}/{gitSha}/{gitBranch} resolve from the file's git repo.
@@ -34,12 +35,12 @@ const { registerEmbed } = require('./embed');
 const actualize = require('./actualize');
 const { CodeLinkModal, PresetPickerModal } = require('./modal');
 const { CodeLinkerSettingTab } = require('./settings-tab');
-const { initI18n, t, plural } = require('./i18n');
+const { initI18n, t, plural } = require('./shared/i18n');
 const api = require('./api');
 
 class CodeLinkerPlugin extends Plugin {
   async onload() {
-    initI18n();
+    initI18n({ en: require('./locales/en'), ru: require('./locales/ru') });
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.setIndex([]);
     this.languages = [];

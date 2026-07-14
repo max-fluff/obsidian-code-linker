@@ -8,7 +8,7 @@
 const { MarkdownRenderChild, Menu } = require('obsidian');
 const nodePath = require('path');
 const { readLines, renderCode } = require('./render');
-const { t } = require('./i18n');
+const { t } = require('./shared/i18n');
 
 const EMBED_LANG = 'code-link';
 const MAX_EMBED_LINES = 400; // bound how much a single embed can pour into the note

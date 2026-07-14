@@ -1,7 +1,7 @@
 'use strict';
 
 const { FuzzySuggestModal } = require('obsidian');
-const { t } = require('./i18n');
+const { t } = require('./shared/i18n');
 
 // Full-screen picker over the code index. The caller supplies what to do with the
 // chosen entry (insert, open, copy…), so the same modal serves every command.

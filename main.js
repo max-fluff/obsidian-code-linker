@@ -5,10 +5,85 @@ var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
 
+// src/shared/markdown.js
+var require_markdown = __commonJS({
+  "src/shared/markdown.js"(exports2, module2) {
+    "use strict";
+    var splitLines2 = (s) => (s || "").split("\n").map((x) => x.trim()).filter(Boolean);
+    var LINK_PATTERN = "\\[([^\\]]*)\\]\\(([^)]+)\\)";
+    var linkRegex2 = () => new RegExp(LINK_PATTERN, "g");
+    var isFenceLine = (line) => {
+      const s = line.trimStart();
+      return s.startsWith("```") || s.startsWith("~~~");
+    };
+    var INLINE_CODE = /`[^`\n]+`/g;
+    function inMatch(line, col, re) {
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(line)) !== null) {
+        if (col > m.index && col < m.index + m[0].length)
+          return true;
+      }
+      return false;
+    }
+    var inInlineCode = (line, col) => inMatch(line, col, INLINE_CODE);
+    function locate(lines, pos) {
+      let start = 0, i = 0;
+      for (; i < lines.length; i++) {
+        if (pos <= start + lines[i].length)
+          break;
+        start += lines[i].length + 1;
+      }
+      return { i, col: pos - start, line: lines[i] || "" };
+    }
+    function inCode2(text, pos) {
+      if (/^---\r?\n/.test(text)) {
+        const end = text.indexOf("\n---", 3);
+        if (end !== -1 && pos <= end + 4)
+          return true;
+      }
+      const lines = text.split("\n");
+      const { i, col, line } = locate(lines, pos);
+      let fenced = false;
+      for (let k = 0; k < i; k++)
+        if (isFenceLine(lines[k]))
+          fenced = !fenced;
+      if (fenced)
+        return true;
+      return inMatch(line, col, INLINE_CODE);
+    }
+    function inLink2(text, pos) {
+      const { col, line } = locate(text.split("\n"), pos);
+      return inMatch(line, col, linkRegex2());
+    }
+    function isProtected(text, pos) {
+      return inCode2(text, pos) || inLink2(text, pos);
+    }
+    function inTableCell2(text, pos) {
+      const lines = text.split("\n");
+      const lineIdx = (text.slice(0, pos).match(/\n/g) || []).length;
+      if (!lines[lineIdx] || !lines[lineIdx].includes("|"))
+        return false;
+      const isDelimiter = (l) => l.includes("|") && l.includes("-") && /^[\s|:-]+$/.test(l);
+      let top = lineIdx, bot = lineIdx;
+      while (top > 0 && lines[top - 1].trim() !== "")
+        top--;
+      while (bot < lines.length - 1 && lines[bot + 1].trim() !== "")
+        bot++;
+      for (let i = top; i <= bot; i++)
+        if (isDelimiter(lines[i]))
+          return true;
+      return false;
+    }
+    module2.exports = { splitLines: splitLines2, linkRegex: linkRegex2, isFenceLine, inInlineCode, locate, inCode: inCode2, inLink: inLink2, isProtected, inTableCell: inTableCell2 };
+  }
+});
+
 // src/constants.js
 var require_constants = __commonJS({
   "src/constants.js"(exports2, module2) {
     "use strict";
+    var { splitLines: splitLines2 } = require_markdown();
     var PRESETS2 = {
       // {root} keeps the note portable: the file holds a relative path, the absolute
       // code root is filled in on render/click (same mechanism as the file preset).
@@ -92,7 +167,6 @@ var require_constants = __commonJS({
       contextMenu: true
       // the "Convert"/"Find and open" items in the editor right-click menu
     };
-    var splitLines2 = (s) => (s || "").split("\n").map((x) => x.trim()).filter(Boolean);
     function parseSkip2(skipDirs) {
       const names = /* @__PURE__ */ new Set();
       const paths = /* @__PURE__ */ new Set();
@@ -135,23 +209,6 @@ var require_constants = __commonJS({
   }
 ]
 `;
-    var LINK_PATTERN = "\\[([^\\]]*)\\]\\(([^)]+)\\)";
-    var linkRegex2 = () => new RegExp(LINK_PATTERN, "g");
-    var isFenceLine = (line) => {
-      const s = line.trimStart();
-      return s.startsWith("```") || s.startsWith("~~~");
-    };
-    var INLINE_CODE = /`[^`\n]+`/g;
-    var inInlineCode = (line, col) => inMatch(line, col, INLINE_CODE);
-    function inMatch(line, col, re) {
-      re.lastIndex = 0;
-      let m;
-      while ((m = re.exec(line)) !== null) {
-        if (col > m.index && col < m.index + m[0].length)
-          return true;
-      }
-      return false;
-    }
     function pathInTarget2(dec, p) {
       let from = 0, i;
       while ((i = dec.indexOf(p, from)) !== -1) {
@@ -161,55 +218,7 @@ var require_constants = __commonJS({
       }
       return false;
     }
-    function locate(lines, pos) {
-      let start = 0, i = 0;
-      for (; i < lines.length; i++) {
-        if (pos <= start + lines[i].length)
-          break;
-        start += lines[i].length + 1;
-      }
-      return { i, col: pos - start, line: lines[i] || "" };
-    }
-    function inCode2(text, pos) {
-      if (/^---\r?\n/.test(text)) {
-        const end = text.indexOf("\n---", 3);
-        if (end !== -1 && pos <= end + 4)
-          return true;
-      }
-      const lines = text.split("\n");
-      const { i, col, line } = locate(lines, pos);
-      let fenced = false;
-      for (let k = 0; k < i; k++)
-        if (isFenceLine(lines[k]))
-          fenced = !fenced;
-      if (fenced)
-        return true;
-      return inMatch(line, col, INLINE_CODE);
-    }
-    function inLink2(text, pos) {
-      const { col, line } = locate(text.split("\n"), pos);
-      return inMatch(line, col, linkRegex2());
-    }
-    function isProtected(text, pos) {
-      return inCode2(text, pos) || inLink2(text, pos);
-    }
-    function inTableCell2(text, pos) {
-      const lines = text.split("\n");
-      const lineIdx = (text.slice(0, pos).match(/\n/g) || []).length;
-      if (!lines[lineIdx] || !lines[lineIdx].includes("|"))
-        return false;
-      const isDelimiter = (l) => l.includes("|") && l.includes("-") && /^[\s|:-]+$/.test(l);
-      let top = lineIdx, bot = lineIdx;
-      while (top > 0 && lines[top - 1].trim() !== "")
-        top--;
-      while (bot < lines.length - 1 && lines[bot + 1].trim() !== "")
-        bot++;
-      for (let i = top; i <= bot; i++)
-        if (isDelimiter(lines[i]))
-          return true;
-      return false;
-    }
-    module2.exports = { PRESETS: PRESETS2, PRISM_LANG: PRISM_LANG2, JETBRAINS_PRODUCTS: JETBRAINS_PRODUCTS2, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, LANGUAGES_TEMPLATE: LANGUAGES_TEMPLATE2, splitLines: splitLines2, parseSkip: parseSkip2, underSkip: underSkip2, pathInTarget: pathInTarget2, isProtected, inCode: inCode2, inLink: inLink2, inInlineCode, isFenceLine, linkRegex: linkRegex2, inTableCell: inTableCell2 };
+    module2.exports = { PRESETS: PRESETS2, PRISM_LANG: PRISM_LANG2, JETBRAINS_PRODUCTS: JETBRAINS_PRODUCTS2, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, LANGUAGES_TEMPLATE: LANGUAGES_TEMPLATE2, parseSkip: parseSkip2, underSkip: underSkip2, pathInTarget: pathInTarget2 };
   }
 });
 
@@ -564,7 +573,7 @@ var require_suggest = __commonJS({
   "src/suggest.js"(exports2, module2) {
     "use strict";
     var { EditorSuggest, prepareFuzzySearch } = require("obsidian");
-    var { isProtected, inTableCell: inTableCell2 } = require_constants();
+    var { isProtected, inTableCell: inTableCell2 } = require_markdown();
     var CodeIndexSuggest2 = class extends EditorSuggest {
       constructor(app, plugin) {
         super(app);
@@ -872,319 +881,15 @@ var require_hover = __commonJS({
   }
 });
 
-// src/locales/en.js
-var require_en = __commonJS({
-  "src/locales/en.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      // Commands
-      "cmd.rebuildIndex": "Rebuild code index",
-      "cmd.insertLink": "Insert code link",
-      "cmd.insertLinkAs": "Insert code link as\u2026",
-      "cmd.switchPreset": "Switch editor preset",
-      "cmd.openFile": "Open code file",
-      "cmd.copyLink": "Copy code link",
-      "cmd.convertSelection": "Convert selection to code link",
-      "cmd.openSelection": "Find and open code",
-      "cmd.insertEmbed": "Insert code embed",
-      "cmd.updateLinksNote": "Update code links in this note",
-      "cmd.updateLinksVault": "Update code links in the whole vault",
-      // Editor context menu
-      "menu.convert": "Find and convert to link",
-      "menu.copyLink": "Copy code link",
-      "menu.fixLink": "Update this code link",
-      // Notices
-      "notice.noCodeRoot": "Code Linker: could not determine code root",
-      "notice.noLanguages": "Code Linker: no languages enabled",
-      "notice.scanFailed": "Code Linker: scan failed \u2014 {error}",
-      "notice.indexed": "Code Linker: {entries} indexed",
-      "notice.missingFolders": "Code Linker: scan folder not found \u2014 {folders}",
-      "notice.copied": "Code Linker: link copied",
-      "notice.noGit": "Code Linker: no git repository (with a remote) found for this file",
-      "notice.editorSet": "Code Linker: links now open in {name}",
-      "notice.noSelection": "Code Linker: select a name or path first",
-      "notice.noMatch": "Code Linker: no code entry matches \u201C{query}\u201D",
-      "notice.watchUnsupported": "Code Linker: auto-refresh is unavailable on this platform \u2014 rebuild manually",
-      "notice.linksUpdated": "Code Linker: {n} link(s) updated",
-      "notice.linksUpdatedVault": "Code Linker: {n} link(s) updated across {files} note(s)",
-      "notice.langFileNoPath": "Code Linker: set a languages file path first",
-      "notice.langFileExists": "Code Linker: the languages file already exists",
-      "notice.langFileCreated": "Code Linker: created {path}",
-      "notice.langFileError": "Code Linker: could not create the file \u2014 {error}",
-      // Inline embeds
-      "embed.empty": "Code Linker: empty embed \u2014 give a symbol name or a path:line",
-      "embed.fmt.symbol": "Symbol \u2014 tracks the declaration as code moves",
-      "embed.fmt.line": "Declaration line ({line})",
-      "embed.fmt.range": "Line range ({from}-{to}, edit to taste)",
-      "embed.menu.open": "Open code file",
-      "embed.menu.refresh": "Refresh embed",
-      "embed.notFound": "Code Linker: no code entry matches \u201C{query}\u201D",
-      "embed.ambiguous": "Code Linker: {n} entries match \u201C{query}\u201D \u2014 add a language/kind filter (e.g. py:) or a path to pick one",
-      "embed.unreadable": "Code Linker: can\u2019t read {path}",
-      "embed.truncated": "Code Linker: showing the first {max} lines",
-      // Status bar
-      "status.indexing": "Code Linker: indexing\u2026 {n}",
-      "status.editor": "Code link: {name}",
-      "status.editorTooltip": "Code Linker: click to switch the editor links open in",
-      // Command-palette modal
-      "modal.searchPlaceholder": "Search code files and types\u2026",
-      "modal.switchPlaceholder": "Choose the editor links open in\u2026",
-      "modal.formatPlaceholder": "Choose an editor format for this link\u2026",
-      "modal.productPlaceholder": "Choose a JetBrains IDE\u2026",
-      "modal.embedPlaceholder": "Choose an embed format\u2026",
-      // Settings — headings
-      "set.heading.index": "Code index",
-      "set.heading.languages": "Languages",
-      "set.heading.customLanguages": "Custom languages",
-      "set.heading.suggestions": "Suggestions & links",
-      "set.heading.hover": "Hover preview",
-      "set.heading.links": "Links",
-      // Settings — code index
-      "set.codeRoot.name": "Code root",
-      "set.codeRoot.desc": "Base folder the scan paths are relative to. Empty = the folder containing this vault.",
-      "set.scanFolders.name": "Scan folders",
-      "set.scanFolders.desc": "Folders scanned for source files, relative to the code root. Leave empty to scan the whole code root.",
-      "set.scanFolders.notFound": "\u26A0 Not found under the code root \u2014 {folders}",
-      "set.folderList.add": "Add folder\u2026",
-      "set.folderList.remove": "Remove",
-      "set.folderList.addAria": "Add",
-      "set.maxFileSize.name": "Max file size (KB)",
-      "set.maxFileSize.desc": "Files larger than this are indexed by name only, not parsed for declarations. 0 = no limit.",
-      "set.skipFolders.name": "Skip folders",
-      "set.skipFolders.desc": "A bare name (node_modules) is skipped at any depth; a path with a slash (src/generated) skips only that folder, relative to the code root.",
-      "set.rebuild.name": "Rebuild index now",
-      "set.rebuild.button": "Rebuild",
-      // Settings — languages
-      "set.languages.desc": "Which languages are scanned \u2014 {enabled} of {total} enabled. Expand an enabled language to pick which of its entity kinds are searchable.",
-      "set.lang.meta": "id: {id} \xB7 {ext}",
-      "set.lang.noExtensions": "(no extensions)",
-      "set.lang.showEntities": "Show entities",
-      "set.lang.hideEntities": "Hide entities",
-      "set.lang.invalid": "Invalid: {error}",
-      "set.kind.count": "{n} in index",
-      "set.kind.rebuildHint": "Rebuild the index to choose which of its entities are searchable.",
-      // Settings — custom languages
-      "set.customLanguages.desc": "Add your own languages, or override a built-in, from a JSON file in your vault. Set a path below and press Create to write a starter template, edit it, then save \u2014 it reloads on save. An entry whose id matches a built-in replaces it; a new id appears as a new language above.",
-      "set.languagesFile.name": "Languages file",
-      "set.languagesFile.desc": "Path to the JSON file, relative to your vault root.",
-      "set.languagesFile.create": "Create file",
-      "set.languagesFile.open": "Open the languages file",
-      "set.reloadLanguages.name": "Reload languages file",
-      "set.reloadLanguages.desc": "Re-reads the file and rebuilds. Also happens automatically when you save the file.",
-      "set.reloadLanguages.button": "Reload & rebuild",
-      // Settings — suggestions & links
-      "set.trigger.name": "Trigger",
-      "set.trigger.desc": "Type this to start a code suggestion.",
-      "set.editorPreset.name": "Editor link preset",
-      "set.editorPreset.desc": "Which editor the inserted links open in. Add your own under \u201CYour editors\u201D below.",
-      "set.preset.vscode": "VS Code",
-      "set.preset.jetbrains": "JetBrains",
-      "set.preset.file": "file://",
-      "set.preset.github": "GitHub permalink",
-      "set.preset.gitlab": "GitLab permalink",
-      "set.preset.ask": "Always ask",
-      "set.jetbrainsProduct.name": "JetBrains IDE",
-      "set.jetbrainsProduct.desc": "Which JetBrains IDE the links open in.",
-      "set.shownPresets.name": "Shown in the picker",
-      "set.shownPresets.count": "{shown} of {total} shown",
-      "set.shownPresets.desc": "Which built-in presets appear in the pickers. Your own editors always appear.",
-      "set.editors.name": "Your editors",
-      "set.editors.count": "{n} added",
-      "set.editors.collapse": "Collapse",
-      "set.editors.expand": "Expand",
-      "set.editors.desc": "Named presets for the dropdown above. Placeholders: {abs} {path} {line} {name} {project} {jetbrainsProduct} {root} {gitRemote} {gitSha} {gitBranch}.",
-      "set.editors.namePlaceholder": "Name",
-      "set.editors.remove": "Remove",
-      "set.editors.add": "+ Add editor",
-      "set.statusBar.name": "Show editor in status bar",
-      "set.statusBar.desc": "Show the active editor preset in the status bar; click it to switch without opening settings.",
-      "set.minChars.name": "Min characters",
-      "set.minChars.desc": "How many characters to type before suggestions appear.",
-      "set.maxResults.name": "Max results",
-      "set.maxResults.desc": "Most suggestions to show at once.",
-      "set.autoRefresh.name": "Auto-refresh index",
-      "set.autoRefresh.desc": "Watch the scan folders and rebuild the index when source files change.",
-      "set.autoRefresh.unsupported": "Recursive folder watching isn\u2019t supported on this platform (Linux); rebuild manually instead.",
-      "set.contextMenu.name": "Editor context menu",
-      "set.contextMenu.desc": "Add \u201CFind and convert to link\u201D and \u201CFind and open code\u201D to the editor right-click menu \u2014 plus \u201CCopy code link\u201D when you right-click a code link.",
-      "set.hoverPreview.name": "Code preview on hover",
-      "set.hoverPreview.desc": "Preview the file around a code link\u2019s line when you hover it. In live preview, hold Ctrl/Cmd; in reading view a plain hover is enough.",
-      "set.hoverBefore.name": "Preview lines before",
-      "set.hoverBefore.desc": "How many lines to show above the target line. -1 = no limit (to the start of the file).",
-      "set.hoverAfter.name": "Preview lines after",
-      "set.hoverAfter.desc": "How many lines to show below the target line. -1 = no limit (to the end of the file).",
-      "set.markStaleLinks.name": "Mark stale links",
-      "set.markStaleLinks.desc": "Underline code links whose stored line has drifted from the declaration (warning colour) or whose symbol is gone \u2014 renamed or removed (error colour). Run \u201CUpdate code links\u2026\u201D to fix drifted ones.",
-      "set.info": "Code root: {root} \xB7 {entries} indexed",
-      "set.info.unknownRoot": "(unknown)",
-      // Plural noun phrases
-      "plural.entry": { one: "{n} entry", other: "{n} entries" }
-    };
-  }
-});
-
-// src/locales/ru.js
-var require_ru = __commonJS({
-  "src/locales/ru.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      // Commands
-      "cmd.rebuildIndex": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043A\u043E\u0434\u0430",
-      "cmd.insertLink": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
-      "cmd.insertLinkAs": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434 \u043A\u0430\u043A\u2026",
-      "cmd.switchPreset": "\u0421\u043C\u0435\u043D\u0438\u0442\u044C \u043F\u0440\u0435\u0441\u0435\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430",
-      "cmd.openFile": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0444\u0430\u0439\u043B \u043A\u043E\u0434\u0430",
-      "cmd.copyLink": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
-      "cmd.convertSelection": "\u041F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u0435 \u0432 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
-      "cmd.openSelection": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434",
-      "cmd.insertEmbed": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C embed \u043A\u043E\u0434\u0430",
-      "cmd.updateLinksNote": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u043A\u043E\u0434 \u0432 \u044D\u0442\u043E\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0435",
-      "cmd.updateLinksVault": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u043A\u043E\u0434 \u0432\u043E \u0432\u0441\u0451\u043C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
-      // Editor context menu
-      "menu.convert": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
-      "menu.copyLink": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
-      "menu.fixLink": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
-      // Notices
-      "notice.noCodeRoot": "Code Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u044C \u043A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430",
-      "notice.noLanguages": "Code Linker: \u043D\u0435 \u0432\u043A\u043B\u044E\u0447\u0451\u043D \u043D\u0438 \u043E\u0434\u0438\u043D \u044F\u0437\u044B\u043A",
-      "notice.scanFailed": "Code Linker: \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u2014 {error}",
-      "notice.indexed": "Code Linker: \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
-      "notice.missingFolders": "Code Linker: \u043F\u0430\u043F\u043A\u0430 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u2014 {folders}",
-      "notice.copied": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u0430",
-      "notice.noGit": "Code Linker: \u0434\u043B\u044F \u044D\u0442\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D git-\u0440\u0435\u043F\u043E\u0437\u0438\u0442\u043E\u0440\u0438\u0439 \u0441 remote",
-      "notice.editorSet": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0438 \u0442\u0435\u043F\u0435\u0440\u044C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432 {name}",
-      "notice.noSelection": "Code Linker: \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u044B\u0434\u0435\u043B\u0438\u0442\u0435 \u0438\u043C\u044F \u0438\u043B\u0438 \u043F\u0443\u0442\u044C",
-      "notice.noMatch": "Code Linker: \u043D\u0435\u0442 \u0437\u0430\u043F\u0438\u0441\u0438 \u043A\u043E\u0434\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
-      "notice.watchUnsupported": "Code Linker: \u0430\u0432\u0442\u043E\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 \u2014 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
-      "notice.linksUpdated": "Code Linker: \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n}",
-      "notice.linksUpdatedVault": "Code Linker: \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}",
-      "notice.langFileNoPath": "Code Linker: \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0443\u043A\u0430\u0436\u0438\u0442\u0435 \u043F\u0443\u0442\u044C \u043A \u0444\u0430\u0439\u043B\u0443 \u044F\u0437\u044B\u043A\u043E\u0432",
-      "notice.langFileExists": "Code Linker: \u0444\u0430\u0439\u043B \u044F\u0437\u044B\u043A\u043E\u0432 \u0443\u0436\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442",
-      "notice.langFileCreated": "Code Linker: \u0441\u043E\u0437\u0434\u0430\u043D {path}",
-      "notice.langFileError": "Code Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0444\u0430\u0439\u043B \u2014 {error}",
-      // Inline embeds
-      "embed.empty": "Code Linker: \u043F\u0443\u0441\u0442\u043E\u0439 embed \u2014 \u0443\u043A\u0430\u0436\u0438\u0442\u0435 \u0438\u043C\u044F \u0441\u0438\u043C\u0432\u043E\u043B\u0430 \u0438\u043B\u0438 \u043F\u0443\u0442\u044C:\u0441\u0442\u0440\u043E\u043A\u0443",
-      "embed.fmt.symbol": "\u0421\u0438\u043C\u0432\u043E\u043B \u2014 \u0441\u043B\u0435\u0434\u0443\u0435\u0442 \u0437\u0430 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u0435\u043C \u043F\u0440\u0438 \u0434\u0432\u0438\u0436\u0435\u043D\u0438\u0438 \u043A\u043E\u0434\u0430",
-      "embed.fmt.line": "\u0421\u0442\u0440\u043E\u043A\u0430 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u044F ({line})",
-      "embed.fmt.range": "\u0414\u0438\u0430\u043F\u0430\u0437\u043E\u043D \u0441\u0442\u0440\u043E\u043A ({from}-{to}, \u043F\u043E\u043F\u0440\u0430\u0432\u044C\u0442\u0435 \u043F\u043E \u0432\u043A\u0443\u0441\u0443)",
-      "embed.menu.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0444\u0430\u0439\u043B \u043A\u043E\u0434\u0430",
-      "embed.menu.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C embed",
-      "embed.notFound": "Code Linker: \u043D\u0435\u0442 \u0437\u0430\u043F\u0438\u0441\u0438 \u043A\u043E\u0434\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
-      "embed.ambiguous": "Code Linker: \u043F\u043E\u0434 \xAB{query}\xBB \u043F\u043E\u0434\u0445\u043E\u0434\u0438\u0442 \u0437\u0430\u043F\u0438\u0441\u0435\u0439: {n} \u2014 \u0443\u0442\u043E\u0447\u043D\u0438\u0442\u0435 \u0444\u0438\u043B\u044C\u0442\u0440\u043E\u043C \u044F\u0437\u044B\u043A\u0430/\u0442\u0438\u043F\u0430 (\u043D\u0430\u043F\u0440. py:) \u0438\u043B\u0438 \u043F\u0443\u0442\u0451\u043C",
-      "embed.unreadable": "Code Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C {path}",
-      "embed.truncated": "Code Linker: \u043F\u043E\u043A\u0430\u0437\u0430\u043D\u044B \u043F\u0435\u0440\u0432\u044B\u0435 {max} \u0441\u0442\u0440\u043E\u043A",
-      // Status bar
-      "status.indexing": "Code Linker: \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435\u2026 {n}",
-      "status.editor": "\u0421\u0441\u044B\u043B\u043A\u0430 \u043D\u0430 \u043A\u043E\u0434: {name}",
-      "status.editorTooltip": "Code Linker: \u043A\u043B\u0438\u043A \u2014 \u0441\u043C\u0435\u043D\u0438\u0442\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440, \u0432 \u043A\u043E\u0442\u043E\u0440\u043E\u043C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0441\u0441\u044B\u043B\u043A\u0438",
-      // Command-palette modal
-      "modal.searchPlaceholder": "\u041F\u043E\u0438\u0441\u043A \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u0442\u0438\u043F\u043E\u0432 \u043A\u043E\u0434\u0430\u2026",
-      "modal.switchPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440, \u0432 \u043A\u043E\u0442\u043E\u0440\u043E\u043C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0441\u0441\u044B\u043B\u043A\u0438\u2026",
-      "modal.formatPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430 \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u0441\u0441\u044B\u043B\u043A\u0438\u2026",
-      "modal.productPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 IDE JetBrains\u2026",
-      "modal.embedPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 embed\u2026",
-      // Settings — headings
-      "set.heading.index": "\u0418\u043D\u0434\u0435\u043A\u0441 \u043A\u043E\u0434\u0430",
-      "set.heading.languages": "\u042F\u0437\u044B\u043A\u0438",
-      "set.heading.customLanguages": "\u0421\u0432\u043E\u0438 \u044F\u0437\u044B\u043A\u0438",
-      "set.heading.suggestions": "\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438 \u0438 \u0441\u0441\u044B\u043B\u043A\u0438",
-      "set.heading.hover": "\u041F\u0440\u0435\u0432\u044C\u044E \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438",
-      "set.heading.links": "\u0421\u0441\u044B\u043B\u043A\u0438",
-      // Settings — code index
-      "set.codeRoot.name": "\u041A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430",
-      "set.codeRoot.desc": "\u0411\u0430\u0437\u043E\u0432\u0430\u044F \u043F\u0430\u043F\u043A\u0430, \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0442\u043E\u0440\u043E\u0439 \u0437\u0430\u0434\u0430\u044E\u0442\u0441\u044F \u043F\u0443\u0442\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F. \u041F\u0443\u0441\u0442\u043E = \u043F\u0430\u043F\u043A\u0430, \u0441\u043E\u0434\u0435\u0440\u0436\u0430\u0449\u0430\u044F \u044D\u0442\u043E \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435.",
-      "set.scanFolders.name": "\u041F\u0430\u043F\u043A\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F",
-      "set.scanFolders.desc": "\u041F\u0430\u043F\u043A\u0438, \u0441\u043A\u0430\u043D\u0438\u0440\u0443\u0435\u043C\u044B\u0435 \u043D\u0430 \u0438\u0441\u0445\u043E\u0434\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u044B, \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F \u043A\u043E\u0434\u0430. \u041E\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \u043F\u0443\u0441\u0442\u044B\u043C, \u0447\u0442\u043E\u0431\u044B \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0432\u0435\u0441\u044C \u043A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430.",
-      "set.scanFolders.notFound": "\u26A0 \u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E \u0432 \u043A\u043E\u0440\u043D\u0435 \u043A\u043E\u0434\u0430 \u2014 {folders}",
-      "set.folderList.add": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0430\u043F\u043A\u0443\u2026",
-      "set.folderList.remove": "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
-      "set.folderList.addAria": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C",
-      "set.maxFileSize.name": "\u041C\u0430\u043A\u0441. \u0440\u0430\u0437\u043C\u0435\u0440 \u0444\u0430\u0439\u043B\u0430 (\u041A\u0411)",
-      "set.maxFileSize.desc": "\u0424\u0430\u0439\u043B\u044B \u043A\u0440\u0443\u043F\u043D\u0435\u0435 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E \u0438\u043C\u0435\u043D\u0438, \u0431\u0435\u0437 \u0440\u0430\u0437\u0431\u043E\u0440\u0430 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u0439. 0 = \u0431\u0435\u0437 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u044F.",
-      "set.skipFolders.name": "\u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u043C\u044B\u0435 \u043F\u0430\u043F\u043A\u0438",
-      "set.skipFolders.desc": "\u041F\u0440\u043E\u0441\u0442\u043E \u0438\u043C\u044F (node_modules) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u043B\u044E\u0431\u043E\u0439 \u0433\u043B\u0443\u0431\u0438\u043D\u0435; \u043F\u0443\u0442\u044C \u0441\u043E \u0441\u043B\u044D\u0448\u0435\u043C (src/generated) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u0443 \u043F\u0430\u043F\u043A\u0443 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F \u043A\u043E\u0434\u0430.",
-      "set.rebuild.name": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u0441\u0435\u0439\u0447\u0430\u0441",
-      "set.rebuild.button": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C",
-      // Settings — languages
-      "set.languages.desc": "\u041A\u0430\u043A\u0438\u0435 \u044F\u0437\u044B\u043A\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u2014 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E {enabled} \u0438\u0437 {total}. \u0420\u0430\u0437\u0432\u0435\u0440\u043D\u0438\u0442\u0435 \u0432\u043A\u043B\u044E\u0447\u0451\u043D\u043D\u044B\u0439 \u044F\u0437\u044B\u043A, \u0447\u0442\u043E\u0431\u044B \u0432\u044B\u0431\u0440\u0430\u0442\u044C, \u043A\u0430\u043A\u0438\u0435 \u0432\u0438\u0434\u044B \u0441\u0443\u0449\u043D\u043E\u0441\u0442\u0435\u0439 \u0432 \u043D\u0451\u043C \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B \u0434\u043B\u044F \u043F\u043E\u0438\u0441\u043A\u0430.",
-      "set.lang.meta": "id: {id} \xB7 {ext}",
-      "set.lang.noExtensions": "(\u0431\u0435\u0437 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439)",
-      "set.lang.showEntities": "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0441\u0443\u0449\u043D\u043E\u0441\u0442\u0438",
-      "set.lang.hideEntities": "\u0421\u043A\u0440\u044B\u0442\u044C \u0441\u0443\u0449\u043D\u043E\u0441\u0442\u0438",
-      "set.lang.invalid": "\u041D\u0435\u043A\u043E\u0440\u0440\u0435\u043A\u0442\u043D\u043E: {error}",
-      "set.kind.count": "\u0432 \u0438\u043D\u0434\u0435\u043A\u0441\u0435: {n}",
-      "set.kind.rebuildHint": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0439\u0442\u0435 \u0438\u043D\u0434\u0435\u043A\u0441, \u0447\u0442\u043E\u0431\u044B \u0432\u044B\u0431\u0440\u0430\u0442\u044C, \u043A\u0430\u043A\u0438\u0435 \u0435\u0433\u043E \u0441\u0443\u0449\u043D\u043E\u0441\u0442\u0438 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B \u0434\u043B\u044F \u043F\u043E\u0438\u0441\u043A\u0430.",
-      // Settings — custom languages
-      "set.customLanguages.desc": "\u0414\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u0441\u0432\u043E\u0438 \u044F\u0437\u044B\u043A\u0438 \u0438\u043B\u0438 \u043F\u0435\u0440\u0435\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u0435 \u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0439 \u0447\u0435\u0440\u0435\u0437 JSON-\u0444\u0430\u0439\u043B \u0432 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435. \u0423\u043A\u0430\u0436\u0438\u0442\u0435 \u043F\u0443\u0442\u044C \u043D\u0438\u0436\u0435 \u0438 \u043D\u0430\u0436\u043C\u0438\u0442\u0435 \xAB\u0421\u043E\u0437\u0434\u0430\u0442\u044C \u0444\u0430\u0439\u043B\xBB, \u0447\u0442\u043E\u0431\u044B \u0437\u0430\u043F\u0438\u0441\u0430\u0442\u044C \u0441\u0442\u0430\u0440\u0442\u043E\u0432\u044B\u0439 \u0448\u0430\u0431\u043B\u043E\u043D, \u043E\u0442\u0440\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u0443\u0439\u0442\u0435 \u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u0435 \u2014 \u043E\u043D \u043F\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u0441\u044F \u043F\u0440\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0438. \u0417\u0430\u043F\u0438\u0441\u044C \u0441 id \u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u043E\u0433\u043E \u044F\u0437\u044B\u043A\u0430 \u0437\u0430\u043C\u0435\u043D\u044F\u0435\u0442 \u0435\u0433\u043E; \u043D\u043E\u0432\u044B\u0439 id \u043F\u043E\u044F\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u043A\u0430\u043A \u043D\u043E\u0432\u044B\u0439 \u044F\u0437\u044B\u043A \u0432\u044B\u0448\u0435.",
-      "set.languagesFile.name": "\u0424\u0430\u0439\u043B \u044F\u0437\u044B\u043A\u043E\u0432",
-      "set.languagesFile.desc": "\u041F\u0443\u0442\u044C \u043A JSON-\u0444\u0430\u0439\u043B\u0443 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430.",
-      "set.languagesFile.create": "\u0421\u043E\u0437\u0434\u0430\u0442\u044C \u0444\u0430\u0439\u043B",
-      "set.languagesFile.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0444\u0430\u0439\u043B \u044F\u0437\u044B\u043A\u043E\u0432",
-      "set.reloadLanguages.name": "\u041F\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u0444\u0430\u0439\u043B \u044F\u0437\u044B\u043A\u043E\u0432",
-      "set.reloadLanguages.desc": "\u041F\u0435\u0440\u0435\u0447\u0438\u0442\u044B\u0432\u0430\u0435\u0442 \u0444\u0430\u0439\u043B \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0435\u0442 \u0438\u043D\u0434\u0435\u043A\u0441. \u0422\u0430\u043A\u0436\u0435 \u043F\u0440\u043E\u0438\u0441\u0445\u043E\u0434\u0438\u0442 \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u043F\u0440\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0438 \u0444\u0430\u0439\u043B\u0430.",
-      "set.reloadLanguages.button": "\u041F\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C",
-      // Settings — suggestions & links
-      "set.trigger.name": "\u0422\u0440\u0438\u0433\u0433\u0435\u0440",
-      "set.trigger.desc": "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u044D\u0442\u043E, \u0447\u0442\u043E\u0431\u044B \u043D\u0430\u0447\u0430\u0442\u044C \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0443 \u043F\u043E \u043A\u043E\u0434\u0443.",
-      "set.editorPreset.name": "\u041F\u0440\u0435\u0441\u0435\u0442 \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440",
-      "set.editorPreset.desc": "\u0412 \u043A\u0430\u043A\u043E\u043C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0435 \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438. \u0421\u0432\u043E\u0438 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u044E\u0442\u0441\u044F \u0432 \xAB\u0412\u0430\u0448\u0438 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u044B\xBB \u043D\u0438\u0436\u0435.",
-      "set.preset.vscode": "VS Code",
-      "set.preset.jetbrains": "JetBrains",
-      "set.preset.file": "file://",
-      "set.preset.github": "\u041F\u0435\u0440\u043C\u0430\u043B\u0438\u043D\u043A GitHub",
-      "set.preset.gitlab": "\u041F\u0435\u0440\u043C\u0430\u043B\u0438\u043D\u043A GitLab",
-      "set.preset.ask": "\u0412\u0441\u0435\u0433\u0434\u0430 \u0441\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0442\u044C",
-      "set.jetbrainsProduct.name": "IDE JetBrains",
-      "set.jetbrainsProduct.desc": "\u0412 \u043A\u0430\u043A\u043E\u0439 JetBrains IDE \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0441\u0441\u044B\u043B\u043A\u0438.",
-      "set.shownPresets.name": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0432 \u0432\u044B\u0431\u043E\u0440\u0435",
-      "set.shownPresets.count": "\u043F\u043E\u043A\u0430\u0437\u0430\u043D\u043E: {shown} \u0438\u0437 {total}",
-      "set.shownPresets.desc": "\u041A\u0430\u043A\u0438\u0435 \u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0435 \u043F\u0440\u0435\u0441\u0435\u0442\u044B \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432 \u043F\u0438\u043A\u0435\u0440\u0430\u0445. \u0412\u0430\u0448\u0438 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u044B \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432\u0441\u0435\u0433\u0434\u0430.",
-      "set.editors.name": "\u0412\u0430\u0448\u0438 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u044B",
-      "set.editors.count": "\u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u043E: {n}",
-      "set.editors.collapse": "\u0421\u0432\u0435\u0440\u043D\u0443\u0442\u044C",
-      "set.editors.expand": "\u0420\u0430\u0437\u0432\u0435\u0440\u043D\u0443\u0442\u044C",
-      "set.editors.desc": "\u0418\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u043D\u044B\u0435 \u043F\u0440\u0435\u0441\u0435\u0442\u044B \u0434\u043B\u044F \u0441\u043F\u0438\u0441\u043A\u0430 \u0432\u044B\u0448\u0435. \u041F\u043B\u0435\u0439\u0441\u0445\u043E\u043B\u0434\u0435\u0440\u044B: {abs} {path} {line} {name} {project} {jetbrainsProduct} {root} {gitRemote} {gitSha} {gitBranch}.",
-      "set.editors.namePlaceholder": "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435",
-      "set.editors.remove": "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
-      "set.editors.add": "+ \u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440",
-      "set.statusBar.name": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440 \u0432 \u0441\u0442\u0430\u0442\u0443\u0441-\u0431\u0430\u0440\u0435",
-      "set.statusBar.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0439 \u043F\u0440\u0435\u0441\u0435\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430 \u0432 \u0441\u0442\u0430\u0442\u0443\u0441-\u0431\u0430\u0440\u0435; \u043A\u043B\u0438\u043A \u043F\u043E \u043D\u0435\u043C\u0443 \u043C\u0435\u043D\u044F\u0435\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440 \u0431\u0435\u0437 \u0432\u0445\u043E\u0434\u0430 \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438.",
-      "set.minChars.name": "\u041C\u0438\u043D\u0438\u043C\u0443\u043C \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432",
-      "set.minChars.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432 \u0432\u0432\u0435\u0441\u0442\u0438, \u043F\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043C \u043F\u043E\u044F\u0432\u044F\u0442\u0441\u044F \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438.",
-      "set.maxResults.name": "\u041C\u0430\u043A\u0441\u0438\u043C\u0443\u043C \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u043E\u0432",
-      "set.maxResults.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043E\u043A \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043E\u0434\u043D\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E.",
-      "set.autoRefresh.name": "\u0410\u0432\u0442\u043E\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u0438\u043D\u0434\u0435\u043A\u0441\u0430",
-      "set.autoRefresh.desc": "\u0421\u043B\u0435\u0434\u0438\u0442\u044C \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0440\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0438\u0441\u0445\u043E\u0434\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432.",
-      "set.autoRefresh.unsupported": "\u0420\u0435\u043A\u0443\u0440\u0441\u0438\u0432\u043D\u043E\u0435 \u0441\u043B\u0435\u0436\u0435\u043D\u0438\u0435 \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u043D\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 (Linux); \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E.",
-      "set.contextMenu.name": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430",
-      "set.contextMenu.desc": "\u0414\u043E\u0431\u0430\u0432\u043B\u044F\u0442\u044C \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443\xBB \u0438 \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434\xBB \u0432 \u043C\u0435\u043D\u044E \u043F\u043E \u043F\u0440\u0430\u0432\u043E\u043C\u0443 \u043A\u043B\u0438\u043A\u0443 \u2014 \u043F\u043B\u044E\u0441 \xAB\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434\xBB \u043F\u0440\u0438 \u043A\u043B\u0438\u043A\u0435 \u043F\u043E \u0441\u0441\u044B\u043B\u043A\u0435 \u0432 \u043A\u043E\u0434.",
-      "set.hoverPreview.name": "\u041F\u0440\u0435\u0432\u044C\u044E \u043A\u043E\u0434\u0430 \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438",
-      "set.hoverPreview.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442 \u0444\u0430\u0439\u043B\u0430 \u0432\u043E\u043A\u0440\u0443\u0433 \u0441\u0442\u0440\u043E\u043A\u0438 \u0441\u0441\u044B\u043B\u043A\u0438 \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438. \u0412 \u0440\u0435\u0436\u0438\u043C\u0435 live preview \u0443\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0439\u0442\u0435 Ctrl/Cmd; \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u0447\u0442\u0435\u043D\u0438\u044F \u0434\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E \u043F\u0440\u043E\u0441\u0442\u043E\u0433\u043E \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u044F.",
-      "set.hoverBefore.name": "\u0421\u0442\u0440\u043E\u043A \u043F\u0440\u0435\u0432\u044C\u044E \u0434\u043E",
-      "set.hoverBefore.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0442\u0440\u043E\u043A \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043D\u0430\u0434 \u0446\u0435\u043B\u0435\u0432\u043E\u0439 \u0441\u0442\u0440\u043E\u043A\u043E\u0439. -1 = \u0431\u0435\u0437 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u044F (\u0434\u043E \u043D\u0430\u0447\u0430\u043B\u0430 \u0444\u0430\u0439\u043B\u0430).",
-      "set.hoverAfter.name": "\u0421\u0442\u0440\u043E\u043A \u043F\u0440\u0435\u0432\u044C\u044E \u043F\u043E\u0441\u043B\u0435",
-      "set.hoverAfter.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0442\u0440\u043E\u043A \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043F\u043E\u0434 \u0446\u0435\u043B\u0435\u0432\u043E\u0439 \u0441\u0442\u0440\u043E\u043A\u043E\u0439. -1 = \u0431\u0435\u0437 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u044F (\u0434\u043E \u043A\u043E\u043D\u0446\u0430 \u0444\u0430\u0439\u043B\u0430).",
-      "set.markStaleLinks.name": "\u041E\u0442\u043C\u0435\u0447\u0430\u0442\u044C \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0435 \u0441\u0441\u044B\u043B\u043A\u0438",
-      "set.markStaleLinks.desc": "\u041F\u043E\u0434\u0447\u0451\u0440\u043A\u0438\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u043A\u043E\u0434, \u0443 \u043A\u043E\u0442\u043E\u0440\u044B\u0445 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430 \u0443\u0435\u0445\u0430\u043B\u0430 \u043E\u0442 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u044F (\u0446\u0432\u0435\u0442 \u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u044F) \u0438\u043B\u0438 \u0441\u0438\u043C\u0432\u043E\u043B \u043F\u0440\u043E\u043F\u0430\u043B \u2014 \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D \u0438\u043B\u0438 \u0443\u0434\u0430\u043B\u0451\u043D (\u0446\u0432\u0435\u0442 \u043E\u0448\u0438\u0431\u043A\u0438). \u0423\u0435\u0445\u0430\u0432\u0448\u0438\u0435 \u0447\u0438\u043D\u044F\u0442\u0441\u044F \u043A\u043E\u043C\u0430\u043D\u0434\u043E\u0439 \xAB\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438\u2026\xBB.",
-      "set.info": "\u041A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430: {root} \xB7 \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
-      "set.info.unknownRoot": "(\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E)",
-      // Plural noun phrases
-      "plural.entry": { one: "{n} \u0437\u0430\u043F\u0438\u0441\u044C", few: "{n} \u0437\u0430\u043F\u0438\u0441\u0438", many: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439", other: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439" }
-    };
-  }
-});
-
-// src/i18n.js
+// src/shared/i18n.js
 var require_i18n = __commonJS({
-  "src/i18n.js"(exports2, module2) {
+  "src/shared/i18n.js"(exports2, module2) {
     "use strict";
-    var LOCALES = {
-      en: require_en(),
-      ru: require_ru()
-    };
+    var LOCALES = { en: {} };
     var dict = LOCALES.en;
     var pluralRules = new Intl.PluralRules("en");
-    function initI18n2() {
+    function initI18n2(locales) {
+      LOCALES = locales;
       const sys = (window.localStorage.getItem("language") || "").split("-")[0].toLowerCase();
       const locale = LOCALES[sys] ? sys : "en";
       dict = LOCALES[locale];
@@ -1436,7 +1141,7 @@ var require_actualize = __commonJS({
     var { ViewPlugin, Decoration } = require("@codemirror/view");
     var { RangeSetBuilder, StateEffect } = require("@codemirror/state");
     var { syntaxTree } = require("@codemirror/language");
-    var { linkRegex: linkRegex2, isFenceLine, inInlineCode } = require_constants();
+    var { linkRegex: linkRegex2, isFenceLine, inInlineCode } = require_markdown();
     var { t: t2 } = require_i18n();
     var LINE_RE = /:(\d+)(?=\D*$)/;
     var SKIP_NODE = /code|comment|frontmatter/i;
@@ -1729,9 +1434,9 @@ var require_folder_suggest = __commonJS({
   }
 });
 
-// src/folder-list.js
+// src/shared/folder-list.js
 var require_folder_list = __commonJS({
-  "src/folder-list.js"(exports2, module2) {
+  "src/shared/folder-list.js"(exports2, module2) {
     "use strict";
     var { Setting, setIcon } = require("obsidian");
     function renderFolderList(containerEl, opts) {
@@ -2223,6 +1928,308 @@ var require_api = __commonJS({
   }
 });
 
+// src/locales/en.js
+var require_en = __commonJS({
+  "src/locales/en.js"(exports2, module2) {
+    "use strict";
+    module2.exports = {
+      // Commands
+      "cmd.rebuildIndex": "Rebuild code index",
+      "cmd.insertLink": "Insert code link",
+      "cmd.insertLinkAs": "Insert code link as\u2026",
+      "cmd.switchPreset": "Switch editor preset",
+      "cmd.openFile": "Open code file",
+      "cmd.copyLink": "Copy code link",
+      "cmd.convertSelection": "Convert selection to code link",
+      "cmd.openSelection": "Find and open code",
+      "cmd.insertEmbed": "Insert code embed",
+      "cmd.updateLinksNote": "Update code links in this note",
+      "cmd.updateLinksVault": "Update code links in the whole vault",
+      // Editor context menu
+      "menu.convert": "Find and convert to link",
+      "menu.copyLink": "Copy code link",
+      "menu.fixLink": "Update this code link",
+      // Notices
+      "notice.noCodeRoot": "Code Linker: could not determine code root",
+      "notice.noLanguages": "Code Linker: no languages enabled",
+      "notice.scanFailed": "Code Linker: scan failed \u2014 {error}",
+      "notice.indexed": "Code Linker: {entries} indexed",
+      "notice.missingFolders": "Code Linker: scan folder not found \u2014 {folders}",
+      "notice.copied": "Code Linker: link copied",
+      "notice.noGit": "Code Linker: no git repository (with a remote) found for this file",
+      "notice.editorSet": "Code Linker: links now open in {name}",
+      "notice.noSelection": "Code Linker: select a name or path first",
+      "notice.noMatch": "Code Linker: no code entry matches \u201C{query}\u201D",
+      "notice.watchUnsupported": "Code Linker: auto-refresh is unavailable on this platform \u2014 rebuild manually",
+      "notice.linksUpdated": "Code Linker: {n} link(s) updated",
+      "notice.linksUpdatedVault": "Code Linker: {n} link(s) updated across {files} note(s)",
+      "notice.langFileNoPath": "Code Linker: set a languages file path first",
+      "notice.langFileExists": "Code Linker: the languages file already exists",
+      "notice.langFileCreated": "Code Linker: created {path}",
+      "notice.langFileError": "Code Linker: could not create the file \u2014 {error}",
+      // Inline embeds
+      "embed.empty": "Code Linker: empty embed \u2014 give a symbol name or a path:line",
+      "embed.fmt.symbol": "Symbol \u2014 tracks the declaration as code moves",
+      "embed.fmt.line": "Declaration line ({line})",
+      "embed.fmt.range": "Line range ({from}-{to}, edit to taste)",
+      "embed.menu.open": "Open code file",
+      "embed.menu.refresh": "Refresh embed",
+      "embed.notFound": "Code Linker: no code entry matches \u201C{query}\u201D",
+      "embed.ambiguous": "Code Linker: {n} entries match \u201C{query}\u201D \u2014 add a language/kind filter (e.g. py:) or a path to pick one",
+      "embed.unreadable": "Code Linker: can\u2019t read {path}",
+      "embed.truncated": "Code Linker: showing the first {max} lines",
+      // Status bar
+      "status.indexing": "Code Linker: indexing\u2026 {n}",
+      "status.editor": "Code link: {name}",
+      "status.editorTooltip": "Code Linker: click to switch the editor links open in",
+      // Command-palette modal
+      "modal.searchPlaceholder": "Search code files and types\u2026",
+      "modal.switchPlaceholder": "Choose the editor links open in\u2026",
+      "modal.formatPlaceholder": "Choose an editor format for this link\u2026",
+      "modal.productPlaceholder": "Choose a JetBrains IDE\u2026",
+      "modal.embedPlaceholder": "Choose an embed format\u2026",
+      // Settings — headings
+      "set.heading.index": "Code index",
+      "set.heading.languages": "Languages",
+      "set.heading.customLanguages": "Custom languages",
+      "set.heading.suggestions": "Suggestions & links",
+      "set.heading.hover": "Hover preview",
+      "set.heading.links": "Links",
+      // Settings — code index
+      "set.codeRoot.name": "Code root",
+      "set.codeRoot.desc": "Base folder the scan paths are relative to. Empty = the folder containing this vault.",
+      "set.scanFolders.name": "Scan folders",
+      "set.scanFolders.desc": "Folders scanned for source files, relative to the code root. Leave empty to scan the whole code root.",
+      "set.scanFolders.notFound": "\u26A0 Not found under the code root \u2014 {folders}",
+      "set.folderList.add": "Add folder\u2026",
+      "set.folderList.remove": "Remove",
+      "set.folderList.addAria": "Add",
+      "set.maxFileSize.name": "Max file size (KB)",
+      "set.maxFileSize.desc": "Files larger than this are indexed by name only, not parsed for declarations. 0 = no limit.",
+      "set.skipFolders.name": "Skip folders",
+      "set.skipFolders.desc": "A bare name (node_modules) is skipped at any depth; a path with a slash (src/generated) skips only that folder, relative to the code root.",
+      "set.rebuild.name": "Rebuild index now",
+      "set.rebuild.button": "Rebuild",
+      // Settings — languages
+      "set.languages.desc": "Which languages are scanned \u2014 {enabled} of {total} enabled. Expand an enabled language to pick which of its entity kinds are searchable.",
+      "set.lang.meta": "id: {id} \xB7 {ext}",
+      "set.lang.noExtensions": "(no extensions)",
+      "set.lang.showEntities": "Show entities",
+      "set.lang.hideEntities": "Hide entities",
+      "set.lang.invalid": "Invalid: {error}",
+      "set.kind.count": "{n} in index",
+      "set.kind.rebuildHint": "Rebuild the index to choose which of its entities are searchable.",
+      // Settings — custom languages
+      "set.customLanguages.desc": "Add your own languages, or override a built-in, from a JSON file in your vault. Set a path below and press Create to write a starter template, edit it, then save \u2014 it reloads on save. An entry whose id matches a built-in replaces it; a new id appears as a new language above.",
+      "set.languagesFile.name": "Languages file",
+      "set.languagesFile.desc": "Path to the JSON file, relative to your vault root.",
+      "set.languagesFile.create": "Create file",
+      "set.languagesFile.open": "Open the languages file",
+      "set.reloadLanguages.name": "Reload languages file",
+      "set.reloadLanguages.desc": "Re-reads the file and rebuilds. Also happens automatically when you save the file.",
+      "set.reloadLanguages.button": "Reload & rebuild",
+      // Settings — suggestions & links
+      "set.trigger.name": "Trigger",
+      "set.trigger.desc": "Type this to start a code suggestion.",
+      "set.editorPreset.name": "Editor link preset",
+      "set.editorPreset.desc": "Which editor the inserted links open in. Add your own under \u201CYour editors\u201D below.",
+      "set.preset.vscode": "VS Code",
+      "set.preset.jetbrains": "JetBrains",
+      "set.preset.file": "file://",
+      "set.preset.github": "GitHub permalink",
+      "set.preset.gitlab": "GitLab permalink",
+      "set.preset.ask": "Always ask",
+      "set.jetbrainsProduct.name": "JetBrains IDE",
+      "set.jetbrainsProduct.desc": "Which JetBrains IDE the links open in.",
+      "set.shownPresets.name": "Shown in the picker",
+      "set.shownPresets.count": "{shown} of {total} shown",
+      "set.shownPresets.desc": "Which built-in presets appear in the pickers. Your own editors always appear.",
+      "set.editors.name": "Your editors",
+      "set.editors.count": "{n} added",
+      "set.editors.collapse": "Collapse",
+      "set.editors.expand": "Expand",
+      "set.editors.desc": "Named presets for the dropdown above. Placeholders: {abs} {path} {line} {name} {project} {jetbrainsProduct} {root} {gitRemote} {gitSha} {gitBranch}.",
+      "set.editors.namePlaceholder": "Name",
+      "set.editors.remove": "Remove",
+      "set.editors.add": "+ Add editor",
+      "set.statusBar.name": "Show editor in status bar",
+      "set.statusBar.desc": "Show the active editor preset in the status bar; click it to switch without opening settings.",
+      "set.minChars.name": "Min characters",
+      "set.minChars.desc": "How many characters to type before suggestions appear.",
+      "set.maxResults.name": "Max results",
+      "set.maxResults.desc": "Most suggestions to show at once.",
+      "set.autoRefresh.name": "Auto-refresh index",
+      "set.autoRefresh.desc": "Watch the scan folders and rebuild the index when source files change.",
+      "set.autoRefresh.unsupported": "Recursive folder watching isn\u2019t supported on this platform (Linux); rebuild manually instead.",
+      "set.contextMenu.name": "Editor context menu",
+      "set.contextMenu.desc": "Add \u201CFind and convert to link\u201D and \u201CFind and open code\u201D to the editor right-click menu \u2014 plus \u201CCopy code link\u201D when you right-click a code link.",
+      "set.hoverPreview.name": "Code preview on hover",
+      "set.hoverPreview.desc": "Preview the file around a code link\u2019s line when you hover it. In live preview, hold Ctrl/Cmd; in reading view a plain hover is enough.",
+      "set.hoverBefore.name": "Preview lines before",
+      "set.hoverBefore.desc": "How many lines to show above the target line. -1 = no limit (to the start of the file).",
+      "set.hoverAfter.name": "Preview lines after",
+      "set.hoverAfter.desc": "How many lines to show below the target line. -1 = no limit (to the end of the file).",
+      "set.markStaleLinks.name": "Mark stale links",
+      "set.markStaleLinks.desc": "Underline code links whose stored line has drifted from the declaration (warning colour) or whose symbol is gone \u2014 renamed or removed (error colour). Run \u201CUpdate code links\u2026\u201D to fix drifted ones.",
+      "set.info": "Code root: {root} \xB7 {entries} indexed",
+      "set.info.unknownRoot": "(unknown)",
+      // Plural noun phrases
+      "plural.entry": { one: "{n} entry", other: "{n} entries" }
+    };
+  }
+});
+
+// src/locales/ru.js
+var require_ru = __commonJS({
+  "src/locales/ru.js"(exports2, module2) {
+    "use strict";
+    module2.exports = {
+      // Commands
+      "cmd.rebuildIndex": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043A\u043E\u0434\u0430",
+      "cmd.insertLink": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
+      "cmd.insertLinkAs": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434 \u043A\u0430\u043A\u2026",
+      "cmd.switchPreset": "\u0421\u043C\u0435\u043D\u0438\u0442\u044C \u043F\u0440\u0435\u0441\u0435\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430",
+      "cmd.openFile": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0444\u0430\u0439\u043B \u043A\u043E\u0434\u0430",
+      "cmd.copyLink": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
+      "cmd.convertSelection": "\u041F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u0435 \u0432 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
+      "cmd.openSelection": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434",
+      "cmd.insertEmbed": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C embed \u043A\u043E\u0434\u0430",
+      "cmd.updateLinksNote": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u043A\u043E\u0434 \u0432 \u044D\u0442\u043E\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0435",
+      "cmd.updateLinksVault": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u043A\u043E\u0434 \u0432\u043E \u0432\u0441\u0451\u043C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
+      // Editor context menu
+      "menu.convert": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
+      "menu.copyLink": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
+      "menu.fixLink": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
+      // Notices
+      "notice.noCodeRoot": "Code Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u044C \u043A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430",
+      "notice.noLanguages": "Code Linker: \u043D\u0435 \u0432\u043A\u043B\u044E\u0447\u0451\u043D \u043D\u0438 \u043E\u0434\u0438\u043D \u044F\u0437\u044B\u043A",
+      "notice.scanFailed": "Code Linker: \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u2014 {error}",
+      "notice.indexed": "Code Linker: \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
+      "notice.missingFolders": "Code Linker: \u043F\u0430\u043F\u043A\u0430 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u2014 {folders}",
+      "notice.copied": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u0430",
+      "notice.noGit": "Code Linker: \u0434\u043B\u044F \u044D\u0442\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D git-\u0440\u0435\u043F\u043E\u0437\u0438\u0442\u043E\u0440\u0438\u0439 \u0441 remote",
+      "notice.editorSet": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0438 \u0442\u0435\u043F\u0435\u0440\u044C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432 {name}",
+      "notice.noSelection": "Code Linker: \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u044B\u0434\u0435\u043B\u0438\u0442\u0435 \u0438\u043C\u044F \u0438\u043B\u0438 \u043F\u0443\u0442\u044C",
+      "notice.noMatch": "Code Linker: \u043D\u0435\u0442 \u0437\u0430\u043F\u0438\u0441\u0438 \u043A\u043E\u0434\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
+      "notice.watchUnsupported": "Code Linker: \u0430\u0432\u0442\u043E\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 \u2014 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
+      "notice.linksUpdated": "Code Linker: \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n}",
+      "notice.linksUpdatedVault": "Code Linker: \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}",
+      "notice.langFileNoPath": "Code Linker: \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0443\u043A\u0430\u0436\u0438\u0442\u0435 \u043F\u0443\u0442\u044C \u043A \u0444\u0430\u0439\u043B\u0443 \u044F\u0437\u044B\u043A\u043E\u0432",
+      "notice.langFileExists": "Code Linker: \u0444\u0430\u0439\u043B \u044F\u0437\u044B\u043A\u043E\u0432 \u0443\u0436\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442",
+      "notice.langFileCreated": "Code Linker: \u0441\u043E\u0437\u0434\u0430\u043D {path}",
+      "notice.langFileError": "Code Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0444\u0430\u0439\u043B \u2014 {error}",
+      // Inline embeds
+      "embed.empty": "Code Linker: \u043F\u0443\u0441\u0442\u043E\u0439 embed \u2014 \u0443\u043A\u0430\u0436\u0438\u0442\u0435 \u0438\u043C\u044F \u0441\u0438\u043C\u0432\u043E\u043B\u0430 \u0438\u043B\u0438 \u043F\u0443\u0442\u044C:\u0441\u0442\u0440\u043E\u043A\u0443",
+      "embed.fmt.symbol": "\u0421\u0438\u043C\u0432\u043E\u043B \u2014 \u0441\u043B\u0435\u0434\u0443\u0435\u0442 \u0437\u0430 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u0435\u043C \u043F\u0440\u0438 \u0434\u0432\u0438\u0436\u0435\u043D\u0438\u0438 \u043A\u043E\u0434\u0430",
+      "embed.fmt.line": "\u0421\u0442\u0440\u043E\u043A\u0430 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u044F ({line})",
+      "embed.fmt.range": "\u0414\u0438\u0430\u043F\u0430\u0437\u043E\u043D \u0441\u0442\u0440\u043E\u043A ({from}-{to}, \u043F\u043E\u043F\u0440\u0430\u0432\u044C\u0442\u0435 \u043F\u043E \u0432\u043A\u0443\u0441\u0443)",
+      "embed.menu.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0444\u0430\u0439\u043B \u043A\u043E\u0434\u0430",
+      "embed.menu.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C embed",
+      "embed.notFound": "Code Linker: \u043D\u0435\u0442 \u0437\u0430\u043F\u0438\u0441\u0438 \u043A\u043E\u0434\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
+      "embed.ambiguous": "Code Linker: \u043F\u043E\u0434 \xAB{query}\xBB \u043F\u043E\u0434\u0445\u043E\u0434\u0438\u0442 \u0437\u0430\u043F\u0438\u0441\u0435\u0439: {n} \u2014 \u0443\u0442\u043E\u0447\u043D\u0438\u0442\u0435 \u0444\u0438\u043B\u044C\u0442\u0440\u043E\u043C \u044F\u0437\u044B\u043A\u0430/\u0442\u0438\u043F\u0430 (\u043D\u0430\u043F\u0440. py:) \u0438\u043B\u0438 \u043F\u0443\u0442\u0451\u043C",
+      "embed.unreadable": "Code Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C {path}",
+      "embed.truncated": "Code Linker: \u043F\u043E\u043A\u0430\u0437\u0430\u043D\u044B \u043F\u0435\u0440\u0432\u044B\u0435 {max} \u0441\u0442\u0440\u043E\u043A",
+      // Status bar
+      "status.indexing": "Code Linker: \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435\u2026 {n}",
+      "status.editor": "\u0421\u0441\u044B\u043B\u043A\u0430 \u043D\u0430 \u043A\u043E\u0434: {name}",
+      "status.editorTooltip": "Code Linker: \u043A\u043B\u0438\u043A \u2014 \u0441\u043C\u0435\u043D\u0438\u0442\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440, \u0432 \u043A\u043E\u0442\u043E\u0440\u043E\u043C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0441\u0441\u044B\u043B\u043A\u0438",
+      // Command-palette modal
+      "modal.searchPlaceholder": "\u041F\u043E\u0438\u0441\u043A \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u0442\u0438\u043F\u043E\u0432 \u043A\u043E\u0434\u0430\u2026",
+      "modal.switchPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440, \u0432 \u043A\u043E\u0442\u043E\u0440\u043E\u043C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0441\u0441\u044B\u043B\u043A\u0438\u2026",
+      "modal.formatPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430 \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u0441\u0441\u044B\u043B\u043A\u0438\u2026",
+      "modal.productPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 IDE JetBrains\u2026",
+      "modal.embedPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 embed\u2026",
+      // Settings — headings
+      "set.heading.index": "\u0418\u043D\u0434\u0435\u043A\u0441 \u043A\u043E\u0434\u0430",
+      "set.heading.languages": "\u042F\u0437\u044B\u043A\u0438",
+      "set.heading.customLanguages": "\u0421\u0432\u043E\u0438 \u044F\u0437\u044B\u043A\u0438",
+      "set.heading.suggestions": "\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438 \u0438 \u0441\u0441\u044B\u043B\u043A\u0438",
+      "set.heading.hover": "\u041F\u0440\u0435\u0432\u044C\u044E \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438",
+      "set.heading.links": "\u0421\u0441\u044B\u043B\u043A\u0438",
+      // Settings — code index
+      "set.codeRoot.name": "\u041A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430",
+      "set.codeRoot.desc": "\u0411\u0430\u0437\u043E\u0432\u0430\u044F \u043F\u0430\u043F\u043A\u0430, \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0442\u043E\u0440\u043E\u0439 \u0437\u0430\u0434\u0430\u044E\u0442\u0441\u044F \u043F\u0443\u0442\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F. \u041F\u0443\u0441\u0442\u043E = \u043F\u0430\u043F\u043A\u0430, \u0441\u043E\u0434\u0435\u0440\u0436\u0430\u0449\u0430\u044F \u044D\u0442\u043E \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435.",
+      "set.scanFolders.name": "\u041F\u0430\u043F\u043A\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F",
+      "set.scanFolders.desc": "\u041F\u0430\u043F\u043A\u0438, \u0441\u043A\u0430\u043D\u0438\u0440\u0443\u0435\u043C\u044B\u0435 \u043D\u0430 \u0438\u0441\u0445\u043E\u0434\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u044B, \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F \u043A\u043E\u0434\u0430. \u041E\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \u043F\u0443\u0441\u0442\u044B\u043C, \u0447\u0442\u043E\u0431\u044B \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0432\u0435\u0441\u044C \u043A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430.",
+      "set.scanFolders.notFound": "\u26A0 \u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E \u0432 \u043A\u043E\u0440\u043D\u0435 \u043A\u043E\u0434\u0430 \u2014 {folders}",
+      "set.folderList.add": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0430\u043F\u043A\u0443\u2026",
+      "set.folderList.remove": "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
+      "set.folderList.addAria": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C",
+      "set.maxFileSize.name": "\u041C\u0430\u043A\u0441. \u0440\u0430\u0437\u043C\u0435\u0440 \u0444\u0430\u0439\u043B\u0430 (\u041A\u0411)",
+      "set.maxFileSize.desc": "\u0424\u0430\u0439\u043B\u044B \u043A\u0440\u0443\u043F\u043D\u0435\u0435 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E \u0438\u043C\u0435\u043D\u0438, \u0431\u0435\u0437 \u0440\u0430\u0437\u0431\u043E\u0440\u0430 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u0439. 0 = \u0431\u0435\u0437 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u044F.",
+      "set.skipFolders.name": "\u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u043C\u044B\u0435 \u043F\u0430\u043F\u043A\u0438",
+      "set.skipFolders.desc": "\u041F\u0440\u043E\u0441\u0442\u043E \u0438\u043C\u044F (node_modules) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u043B\u044E\u0431\u043E\u0439 \u0433\u043B\u0443\u0431\u0438\u043D\u0435; \u043F\u0443\u0442\u044C \u0441\u043E \u0441\u043B\u044D\u0448\u0435\u043C (src/generated) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u0443 \u043F\u0430\u043F\u043A\u0443 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F \u043A\u043E\u0434\u0430.",
+      "set.rebuild.name": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u0441\u0435\u0439\u0447\u0430\u0441",
+      "set.rebuild.button": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C",
+      // Settings — languages
+      "set.languages.desc": "\u041A\u0430\u043A\u0438\u0435 \u044F\u0437\u044B\u043A\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u2014 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E {enabled} \u0438\u0437 {total}. \u0420\u0430\u0437\u0432\u0435\u0440\u043D\u0438\u0442\u0435 \u0432\u043A\u043B\u044E\u0447\u0451\u043D\u043D\u044B\u0439 \u044F\u0437\u044B\u043A, \u0447\u0442\u043E\u0431\u044B \u0432\u044B\u0431\u0440\u0430\u0442\u044C, \u043A\u0430\u043A\u0438\u0435 \u0432\u0438\u0434\u044B \u0441\u0443\u0449\u043D\u043E\u0441\u0442\u0435\u0439 \u0432 \u043D\u0451\u043C \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B \u0434\u043B\u044F \u043F\u043E\u0438\u0441\u043A\u0430.",
+      "set.lang.meta": "id: {id} \xB7 {ext}",
+      "set.lang.noExtensions": "(\u0431\u0435\u0437 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439)",
+      "set.lang.showEntities": "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0441\u0443\u0449\u043D\u043E\u0441\u0442\u0438",
+      "set.lang.hideEntities": "\u0421\u043A\u0440\u044B\u0442\u044C \u0441\u0443\u0449\u043D\u043E\u0441\u0442\u0438",
+      "set.lang.invalid": "\u041D\u0435\u043A\u043E\u0440\u0440\u0435\u043A\u0442\u043D\u043E: {error}",
+      "set.kind.count": "\u0432 \u0438\u043D\u0434\u0435\u043A\u0441\u0435: {n}",
+      "set.kind.rebuildHint": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0439\u0442\u0435 \u0438\u043D\u0434\u0435\u043A\u0441, \u0447\u0442\u043E\u0431\u044B \u0432\u044B\u0431\u0440\u0430\u0442\u044C, \u043A\u0430\u043A\u0438\u0435 \u0435\u0433\u043E \u0441\u0443\u0449\u043D\u043E\u0441\u0442\u0438 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B \u0434\u043B\u044F \u043F\u043E\u0438\u0441\u043A\u0430.",
+      // Settings — custom languages
+      "set.customLanguages.desc": "\u0414\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u0441\u0432\u043E\u0438 \u044F\u0437\u044B\u043A\u0438 \u0438\u043B\u0438 \u043F\u0435\u0440\u0435\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u0435 \u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0439 \u0447\u0435\u0440\u0435\u0437 JSON-\u0444\u0430\u0439\u043B \u0432 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435. \u0423\u043A\u0430\u0436\u0438\u0442\u0435 \u043F\u0443\u0442\u044C \u043D\u0438\u0436\u0435 \u0438 \u043D\u0430\u0436\u043C\u0438\u0442\u0435 \xAB\u0421\u043E\u0437\u0434\u0430\u0442\u044C \u0444\u0430\u0439\u043B\xBB, \u0447\u0442\u043E\u0431\u044B \u0437\u0430\u043F\u0438\u0441\u0430\u0442\u044C \u0441\u0442\u0430\u0440\u0442\u043E\u0432\u044B\u0439 \u0448\u0430\u0431\u043B\u043E\u043D, \u043E\u0442\u0440\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u0443\u0439\u0442\u0435 \u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u0435 \u2014 \u043E\u043D \u043F\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u0441\u044F \u043F\u0440\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0438. \u0417\u0430\u043F\u0438\u0441\u044C \u0441 id \u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u043E\u0433\u043E \u044F\u0437\u044B\u043A\u0430 \u0437\u0430\u043C\u0435\u043D\u044F\u0435\u0442 \u0435\u0433\u043E; \u043D\u043E\u0432\u044B\u0439 id \u043F\u043E\u044F\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u043A\u0430\u043A \u043D\u043E\u0432\u044B\u0439 \u044F\u0437\u044B\u043A \u0432\u044B\u0448\u0435.",
+      "set.languagesFile.name": "\u0424\u0430\u0439\u043B \u044F\u0437\u044B\u043A\u043E\u0432",
+      "set.languagesFile.desc": "\u041F\u0443\u0442\u044C \u043A JSON-\u0444\u0430\u0439\u043B\u0443 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430.",
+      "set.languagesFile.create": "\u0421\u043E\u0437\u0434\u0430\u0442\u044C \u0444\u0430\u0439\u043B",
+      "set.languagesFile.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0444\u0430\u0439\u043B \u044F\u0437\u044B\u043A\u043E\u0432",
+      "set.reloadLanguages.name": "\u041F\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u0444\u0430\u0439\u043B \u044F\u0437\u044B\u043A\u043E\u0432",
+      "set.reloadLanguages.desc": "\u041F\u0435\u0440\u0435\u0447\u0438\u0442\u044B\u0432\u0430\u0435\u0442 \u0444\u0430\u0439\u043B \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0435\u0442 \u0438\u043D\u0434\u0435\u043A\u0441. \u0422\u0430\u043A\u0436\u0435 \u043F\u0440\u043E\u0438\u0441\u0445\u043E\u0434\u0438\u0442 \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u043F\u0440\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0438 \u0444\u0430\u0439\u043B\u0430.",
+      "set.reloadLanguages.button": "\u041F\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C",
+      // Settings — suggestions & links
+      "set.trigger.name": "\u0422\u0440\u0438\u0433\u0433\u0435\u0440",
+      "set.trigger.desc": "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u044D\u0442\u043E, \u0447\u0442\u043E\u0431\u044B \u043D\u0430\u0447\u0430\u0442\u044C \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0443 \u043F\u043E \u043A\u043E\u0434\u0443.",
+      "set.editorPreset.name": "\u041F\u0440\u0435\u0441\u0435\u0442 \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440",
+      "set.editorPreset.desc": "\u0412 \u043A\u0430\u043A\u043E\u043C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0435 \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438. \u0421\u0432\u043E\u0438 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u044E\u0442\u0441\u044F \u0432 \xAB\u0412\u0430\u0448\u0438 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u044B\xBB \u043D\u0438\u0436\u0435.",
+      "set.preset.vscode": "VS Code",
+      "set.preset.jetbrains": "JetBrains",
+      "set.preset.file": "file://",
+      "set.preset.github": "\u041F\u0435\u0440\u043C\u0430\u043B\u0438\u043D\u043A GitHub",
+      "set.preset.gitlab": "\u041F\u0435\u0440\u043C\u0430\u043B\u0438\u043D\u043A GitLab",
+      "set.preset.ask": "\u0412\u0441\u0435\u0433\u0434\u0430 \u0441\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0442\u044C",
+      "set.jetbrainsProduct.name": "IDE JetBrains",
+      "set.jetbrainsProduct.desc": "\u0412 \u043A\u0430\u043A\u043E\u0439 JetBrains IDE \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0441\u0441\u044B\u043B\u043A\u0438.",
+      "set.shownPresets.name": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0432 \u0432\u044B\u0431\u043E\u0440\u0435",
+      "set.shownPresets.count": "\u043F\u043E\u043A\u0430\u0437\u0430\u043D\u043E: {shown} \u0438\u0437 {total}",
+      "set.shownPresets.desc": "\u041A\u0430\u043A\u0438\u0435 \u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0435 \u043F\u0440\u0435\u0441\u0435\u0442\u044B \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432 \u043F\u0438\u043A\u0435\u0440\u0430\u0445. \u0412\u0430\u0448\u0438 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u044B \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432\u0441\u0435\u0433\u0434\u0430.",
+      "set.editors.name": "\u0412\u0430\u0448\u0438 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u044B",
+      "set.editors.count": "\u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u043E: {n}",
+      "set.editors.collapse": "\u0421\u0432\u0435\u0440\u043D\u0443\u0442\u044C",
+      "set.editors.expand": "\u0420\u0430\u0437\u0432\u0435\u0440\u043D\u0443\u0442\u044C",
+      "set.editors.desc": "\u0418\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u043D\u044B\u0435 \u043F\u0440\u0435\u0441\u0435\u0442\u044B \u0434\u043B\u044F \u0441\u043F\u0438\u0441\u043A\u0430 \u0432\u044B\u0448\u0435. \u041F\u043B\u0435\u0439\u0441\u0445\u043E\u043B\u0434\u0435\u0440\u044B: {abs} {path} {line} {name} {project} {jetbrainsProduct} {root} {gitRemote} {gitSha} {gitBranch}.",
+      "set.editors.namePlaceholder": "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435",
+      "set.editors.remove": "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
+      "set.editors.add": "+ \u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440",
+      "set.statusBar.name": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440 \u0432 \u0441\u0442\u0430\u0442\u0443\u0441-\u0431\u0430\u0440\u0435",
+      "set.statusBar.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0439 \u043F\u0440\u0435\u0441\u0435\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430 \u0432 \u0441\u0442\u0430\u0442\u0443\u0441-\u0431\u0430\u0440\u0435; \u043A\u043B\u0438\u043A \u043F\u043E \u043D\u0435\u043C\u0443 \u043C\u0435\u043D\u044F\u0435\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440 \u0431\u0435\u0437 \u0432\u0445\u043E\u0434\u0430 \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438.",
+      "set.minChars.name": "\u041C\u0438\u043D\u0438\u043C\u0443\u043C \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432",
+      "set.minChars.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432 \u0432\u0432\u0435\u0441\u0442\u0438, \u043F\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043C \u043F\u043E\u044F\u0432\u044F\u0442\u0441\u044F \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438.",
+      "set.maxResults.name": "\u041C\u0430\u043A\u0441\u0438\u043C\u0443\u043C \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u043E\u0432",
+      "set.maxResults.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043E\u043A \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043E\u0434\u043D\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E.",
+      "set.autoRefresh.name": "\u0410\u0432\u0442\u043E\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u0438\u043D\u0434\u0435\u043A\u0441\u0430",
+      "set.autoRefresh.desc": "\u0421\u043B\u0435\u0434\u0438\u0442\u044C \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0440\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0438\u0441\u0445\u043E\u0434\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432.",
+      "set.autoRefresh.unsupported": "\u0420\u0435\u043A\u0443\u0440\u0441\u0438\u0432\u043D\u043E\u0435 \u0441\u043B\u0435\u0436\u0435\u043D\u0438\u0435 \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u043D\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 (Linux); \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E.",
+      "set.contextMenu.name": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430",
+      "set.contextMenu.desc": "\u0414\u043E\u0431\u0430\u0432\u043B\u044F\u0442\u044C \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443\xBB \u0438 \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434\xBB \u0432 \u043C\u0435\u043D\u044E \u043F\u043E \u043F\u0440\u0430\u0432\u043E\u043C\u0443 \u043A\u043B\u0438\u043A\u0443 \u2014 \u043F\u043B\u044E\u0441 \xAB\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434\xBB \u043F\u0440\u0438 \u043A\u043B\u0438\u043A\u0435 \u043F\u043E \u0441\u0441\u044B\u043B\u043A\u0435 \u0432 \u043A\u043E\u0434.",
+      "set.hoverPreview.name": "\u041F\u0440\u0435\u0432\u044C\u044E \u043A\u043E\u0434\u0430 \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438",
+      "set.hoverPreview.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442 \u0444\u0430\u0439\u043B\u0430 \u0432\u043E\u043A\u0440\u0443\u0433 \u0441\u0442\u0440\u043E\u043A\u0438 \u0441\u0441\u044B\u043B\u043A\u0438 \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438. \u0412 \u0440\u0435\u0436\u0438\u043C\u0435 live preview \u0443\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0439\u0442\u0435 Ctrl/Cmd; \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u0447\u0442\u0435\u043D\u0438\u044F \u0434\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E \u043F\u0440\u043E\u0441\u0442\u043E\u0433\u043E \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u044F.",
+      "set.hoverBefore.name": "\u0421\u0442\u0440\u043E\u043A \u043F\u0440\u0435\u0432\u044C\u044E \u0434\u043E",
+      "set.hoverBefore.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0442\u0440\u043E\u043A \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043D\u0430\u0434 \u0446\u0435\u043B\u0435\u0432\u043E\u0439 \u0441\u0442\u0440\u043E\u043A\u043E\u0439. -1 = \u0431\u0435\u0437 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u044F (\u0434\u043E \u043D\u0430\u0447\u0430\u043B\u0430 \u0444\u0430\u0439\u043B\u0430).",
+      "set.hoverAfter.name": "\u0421\u0442\u0440\u043E\u043A \u043F\u0440\u0435\u0432\u044C\u044E \u043F\u043E\u0441\u043B\u0435",
+      "set.hoverAfter.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0442\u0440\u043E\u043A \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043F\u043E\u0434 \u0446\u0435\u043B\u0435\u0432\u043E\u0439 \u0441\u0442\u0440\u043E\u043A\u043E\u0439. -1 = \u0431\u0435\u0437 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u044F (\u0434\u043E \u043A\u043E\u043D\u0446\u0430 \u0444\u0430\u0439\u043B\u0430).",
+      "set.markStaleLinks.name": "\u041E\u0442\u043C\u0435\u0447\u0430\u0442\u044C \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0435 \u0441\u0441\u044B\u043B\u043A\u0438",
+      "set.markStaleLinks.desc": "\u041F\u043E\u0434\u0447\u0451\u0440\u043A\u0438\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u043A\u043E\u0434, \u0443 \u043A\u043E\u0442\u043E\u0440\u044B\u0445 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430 \u0443\u0435\u0445\u0430\u043B\u0430 \u043E\u0442 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u044F (\u0446\u0432\u0435\u0442 \u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u044F) \u0438\u043B\u0438 \u0441\u0438\u043C\u0432\u043E\u043B \u043F\u0440\u043E\u043F\u0430\u043B \u2014 \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D \u0438\u043B\u0438 \u0443\u0434\u0430\u043B\u0451\u043D (\u0446\u0432\u0435\u0442 \u043E\u0448\u0438\u0431\u043A\u0438). \u0423\u0435\u0445\u0430\u0432\u0448\u0438\u0435 \u0447\u0438\u043D\u044F\u0442\u0441\u044F \u043A\u043E\u043C\u0430\u043D\u0434\u043E\u0439 \xAB\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438\u2026\xBB.",
+      "set.info": "\u041A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430: {root} \xB7 \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
+      "set.info.unknownRoot": "(\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E)",
+      // Plural noun phrases
+      "plural.entry": { one: "{n} \u0437\u0430\u043F\u0438\u0441\u044C", few: "{n} \u0437\u0430\u043F\u0438\u0441\u0438", many: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439", other: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439" }
+    };
+  }
+});
+
 // src/main.js
 var { Plugin, Notice, normalizePath, MarkdownView } = require("obsidian");
 var { EditorView } = require("@codemirror/view");
@@ -2231,7 +2238,8 @@ var fs = require("fs");
 var fsp = fs.promises;
 var readline = require("readline");
 var nodePath = require("path");
-var { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, splitLines, parseSkip, underSkip, pathInTarget, inTableCell, inCode, inLink, linkRegex } = require_constants();
+var { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, parseSkip, underSkip, pathInTarget } = require_constants();
+var { splitLines, inTableCell, inCode, inLink, linkRegex } = require_markdown();
 var { resolveGit, resolveGitDir } = require_git();
 var GIT_PLACEHOLDER = /{(?:gitRemote|gitSha|gitBranch)}/;
 var PRODUCT_PLACEHOLDER = /{(?:jetbrainsProduct|product)}/;
@@ -2248,7 +2256,7 @@ var { initI18n, t, plural } = require_i18n();
 var api = require_api();
 var CodeLinkerPlugin = class extends Plugin {
   async onload() {
-    initI18n();
+    initI18n({ en: require_en(), ru: require_ru() });
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.setIndex([]);
     this.languages = [];
