@@ -332,7 +332,7 @@ else {
 
 The plugin is written as small CommonJS modules in `src/` and bundled into `main.js` by esbuild. `main.js` is generated — edit `src/` and rebuild rather than editing it directly.
 
-Generic code shared with the sibling Glossary Linker plugin lives in `src/shared/`, a git submodule of [obsidian-linker-shared](https://github.com/max-fluff/obsidian-linker-shared). Clone with `--recurse-submodules` so the build can find it:
+Generic code shared with the sibling linker plugins lives in `src/shared/`, a git submodule of [obsidian-linker-shared](https://github.com/max-fluff/obsidian-linker-shared). Clone with `--recurse-submodules` so the build can find it:
 
 ```sh
 git clone --recurse-submodules https://github.com/max-fluff/obsidian-code-linker
@@ -356,7 +356,7 @@ In an existing clone without the submodule, run `git submodule update --init` fi
 - `api.js` — the public API mixed into the plugin prototype.
 - `constants.js` — defaults and URI presets.
 - `git.js` — reads `.git` to resolve a file's remote/commit/branch for the permalink presets.
-- `shared/` — git submodule shared with Glossary Linker: markdown helpers, the i18n engine, and the folder-list settings editor.
+- `shared/` — git submodule shared with the sibling linker plugins: markdown helpers, the i18n engine, and the folder-list settings editor.
 - `locales/` — interface strings (English and Russian), fed to the shared i18n engine.
 
 To deploy into a test vault on each build, create `esbuild.local.mjs` exporting `deployTargets` (a list of plugin folders to copy the build into). `node_modules/`, `package-lock.json` and `esbuild.local.mjs` are git-ignored.
@@ -377,10 +377,28 @@ Requires Obsidian 1.4.0 or newer. Desktop-only — the index is built by reading
 
 ## Related plugins
 
-Also by the author — **[Glossary Linker](https://community.obsidian.md/plugins/glossary-linker)**: highlights glossary terms in any word form, turns them into real links, and learns new aliases from links you've already made. Works on desktop and mobile.
+Also by the author — the rest of the linker family. Two of them autocomplete a name into a deep-link that lands on the exact spot; two highlight words already in your notes and link them.
+
+**[Reference Linker](https://github.com/max-fluff/obsidian-reference-linker)** — this plugin's document counterpart: autocompletes links to external documents (PDF, Office, images) and inserts a deep-link that opens them at the right page in an external viewer — a section on its page instead of a symbol on its line. Desktop-only. Not in the community catalog yet.
+
+<p align="center">
+  <a href="https://github.com/max-fluff/obsidian-reference-linker">
+    <img src="docs/images/reference-linker-banner.svg" alt="Reference Linker — autocomplete document references, jump to the exact page" width="480">
+  </a>
+</p>
+
+**[Glossary Linker](https://community.obsidian.md/plugins/glossary-linker)** — highlights glossary terms in any word form, turns them into real links, and learns new aliases from links you've already made. Works on desktop and mobile.
 
 <p align="center">
   <a href="https://community.obsidian.md/plugins/glossary-linker">
     <img src="docs/images/glossary-linker-banner.svg" alt="Glossary Linker — highlight terms in any word form, then link them" width="480">
+  </a>
+</p>
+
+**[Heading Linker](https://github.com/max-fluff/obsidian-heading-linker)** — the file-based sibling of Glossary Linker: each heading inside a chosen file is a term, matched in any word form and turned into a link. Works on desktop and mobile. Not in the community catalog yet.
+
+<p align="center">
+  <a href="https://github.com/max-fluff/obsidian-heading-linker">
+    <img src="docs/images/heading-linker-banner.svg" alt="Heading Linker — highlight words in any form, link them to headings" width="480">
   </a>
 </p>
