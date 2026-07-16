@@ -1,4 +1,5 @@
-// Store-plate config for Code Linker. Run: npm run plates
+// Branding config for Code Linker — drives both the store plates and the vector headers.
+// Run: npm run plates / npm run banner
 // See src/shared/branding/BRANDING.md for the full field reference.
 
 export default {
@@ -7,7 +8,6 @@ export default {
 
   brand: {
     gradient: ['#27243d', '#191826'],
-    accent: '#7c6cf0',
     tokenColor: '#b6a6e8',
     tokenMono: true,
     tokens: [
@@ -16,6 +16,7 @@ export default {
     ],
     mark: { kind: 'glyph', text: '[{}]' },
     wordmark: { text: 'Code Linker' },
+    tagline: 'Autocomplete code references, jump to the exact line.',
   },
 
   plates: [
