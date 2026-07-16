@@ -7,7 +7,7 @@
 // The plugin scans the configured folders itself (Node fs, desktop only) and
 // keeps the index in memory — no external build step or index file.
 
-const { Plugin, Notice, normalizePath, MarkdownView } = require('obsidian');
+const { Plugin, Notice, normalizePath, MarkdownView, Menu } = require('obsidian');
 const { EditorView } = require('@codemirror/view');
 const { Prec } = require('@codemirror/state');
 const fs = require('fs');
@@ -16,11 +16,15 @@ const readline = require('readline');
 const nodePath = require('path');
 
 const { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, parseSkip, underSkip, pathInTarget } = require('./constants');
-const { splitLines, inTableCell, inCode, inLink, linkRegex } = require('./shared/markdown');
+const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
+const { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom } = require('./shared/binding');
 const { resolveGit, resolveGitDir } = require('./git');
 
 // Templates whose {gitRemote}/{gitSha}/{gitBranch} resolve from the file's git repo.
 const GIT_PLACEHOLDER = /{(?:gitRemote|gitSha|gitBranch)}/;
+// {line} together with the punctuation that introduces it (":" or "#L"), so a link to a
+// whole file can drop the lot instead of claiming line 1.
+const LINE_TOKEN = /[^\w{}]*[A-Za-z]*\{line\}/;
 // Templates with a JetBrains-IDE placeholder — {jetbrainsProduct}, or the older {product}.
 const PRODUCT_PLACEHOLDER = /{(?:jetbrainsProduct|product)}/;
 
@@ -31,9 +35,9 @@ const { BUILTIN_LANGUAGES } = require('./builtin-languages');
 const { CodeIndexSuggest } = require('./suggest');
 const filter = require('./filter');
 const { HoverPreview } = require('./hover');
-const { registerEmbed } = require('./embed');
+const { registerEmbed, parseSpec, splitPathRange, resolvePath } = require('./embed');
 const actualize = require('./actualize');
-const { CodeLinkModal, PresetPickerModal } = require('./modal');
+const { CodeLinkModal, PresetPickerModal, LinePromptModal } = require('./modal');
 const { CodeLinkerSettingTab } = require('./settings-tab');
 const { initI18n, t, plural } = require('./shared/i18n');
 const api = require('./api');
@@ -48,6 +52,7 @@ class CodeLinkerPlugin extends Plugin {
     this.customRaw = '';
     this.watchers = [];
     this.fileCache = new Map();
+    this.lineMaps = new Map(); // per-file line hashes, built on demand for line links
     this.cacheSignature = '';
     this._indexListeners = new Set(); // API onChange subscribers; needed before the first rebuild
     await this.loadLanguagesFile();
@@ -110,6 +115,17 @@ class CodeLinkerPlugin extends Plugin {
     this.addCommand({ id: 'copy-code-link', name: t('cmd.copyLink'), callback: () => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.copyLink(e, tpl))) });
     this.addCommand({ id: 'convert-selection-to-link', name: t('cmd.convertSelection'), editorCallback: (editor) => this.convertSelection(editor) });
     this.addCommand({ id: 'open-selected-code', name: t('cmd.openSelection'), editorCallback: (editor) => this.openSelection(editor) });
+    this.addCommand({ id: 'insert-code-link-line', name: t('cmd.insertLineLink'), editorCallback: (editor) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLineLink(editor, tpl)) });
+    // The right-click items on a code link, also in the palette.
+    this.addLinkCommand('copy-code-link-at-cursor', t('menu.copyLink'), () => true, (editor, link) => this.copyLinkAtCursor(link));
+    this.addLinkCommand('fix-code-link', t('menu.fixLink'), (link) => this.isLinkStale(link.target), (editor, link) => this.fixLinkAtCursor(editor, link));
+    for (const anchor of ['sym', 'kind', 'line']) {
+      this.addLinkCommand('pin-code-link-' + anchor, t('cmd.pin.' + anchor),
+        (link) => !!this.linkPinOption(link, anchor), (editor, link) => this.pinLink(editor, link, anchor));
+    }
+    this.addLinkCommand('unpin-code-link', t('menu.unpin'), (link) => this.linkAtCursorBound(link), (editor, link) => this.unbindLink(editor, link));
+    this.addCommand({ id: 'pin-links-note', name: t('cmd.pinLinksNote'), callback: () => this.pinLinksInActiveNote() });
+    this.addCommand({ id: 'pin-links-vault', name: t('cmd.pinLinksVault'), callback: () => this.pinLinksInVault() });
     this.addCommand({ id: 'insert-code-embed', name: t('cmd.insertEmbed'), editorCallback: (editor) => this.pickEntry((e) => this.insertEmbed(editor, e)) });
     this.addCommand({ id: 'update-links-note', name: t('cmd.updateLinksNote'), callback: () => this.updateLinksInActiveNote() });
     this.addCommand({ id: 'update-links-vault', name: t('cmd.updateLinksVault'), callback: () => this.updateLinksInVault() });
@@ -128,10 +144,14 @@ class CodeLinkerPlugin extends Plugin {
         // Right-clicking one of our code links: copy its resolved target, and — if the
         // stored line has drifted — offer to fix just that link.
         const link = this.codeLinkAtCursor(editor);
-        if (link && this.isCodeLink(link.name, link.target)) {
+        if (link && this.isCodeLink(link.target)) {
           menu.addItem((item) => item.setTitle(t('menu.copyLink')).setIcon('copy').onClick(() => this.copyLinkAtCursor(link)));
-          if (this.isLinkStale(link.name, link.target)) {
+          if (this.isLinkStale(link.target)) {
             menu.addItem((item) => item.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fixLinkAtCursor(editor, link)));
+          }
+          this.addPinItems(menu, (a) => this.linkPinOption(link, a), (a) => this.pinLink(editor, link, a));
+          if (this.linkAtCursorBound(link)) {
+            menu.addItem((item) => item.setTitle(t('menu.unpin')).setIcon('pin-off').onClick(() => this.unbindLink(editor, link)));
           }
         }
       })
@@ -197,12 +217,20 @@ class CodeLinkerPlugin extends Plugin {
     this.markStaleAnchors(el);
   }
 
+  // A rendered anchor back in raw [text](url "title") form: reading view parses the title
+  // into its own attribute, while Live Preview only ever sees the raw line.
+  anchorTarget(a) {
+    const href = a.getAttribute('href') || a.getAttribute('data-href') || '';
+    const title = a.getAttribute('title') || '';
+    return withTitle(href, title);
+  }
+
   // Toggle the drifted/broken-link underline on every rendered anchor in `el`. toggle (not
   // add) so re-running after an index rebuild also clears links that are now current.
   markStaleAnchors(el) {
     const links = el.querySelectorAll ? el.querySelectorAll('a') : [];
     for (const a of links) {
-      const state = this.settings.markStaleLinks ? this.linkState(a.textContent, a.getAttribute('href') || '') : null;
+      const state = this.settings.markStaleLinks ? this.linkState(this.anchorTarget(a)) : null;
       a.classList.toggle('code-linker-stale', state === 'stale');
       a.classList.toggle('code-linker-broken', state === 'broken');
     }
@@ -271,14 +299,14 @@ class CodeLinkerPlugin extends Plugin {
     if (!el || !el.closest) return null;
     const a = el.closest('a');
     if (a && !(a.classList && a.classList.contains('internal-link'))) {
-      const entry = this.entryUnderPointer(a.textContent, a.getAttribute('href') || a.getAttribute('data-href') || '');
+      const entry = this.entryUnderPointer(this.anchorTarget(a));
       if (entry) return { entry, requireMod: false };
     }
     if (el.closest('.cm-link')) {
       const view = typeof EditorView.findFromDOM === 'function' ? EditorView.findFromDOM(el) : this.activeCm();
       const ref = view && this.codeRefAt(view, x, y);
       if (ref) {
-        const entry = this.entryUnderPointer(ref.name, ref.target);
+        const entry = this.entryUnderPointer(ref.target);
         if (entry) return { entry, requireMod: true };
       }
     }
@@ -298,12 +326,19 @@ class CodeLinkerPlugin extends Plugin {
   // which every preset embeds via {path}/{abs}; that rejects unrelated links even
   // when their text matches a symbol name. Ties are broken by the line in the
   // target, preferring a declaration over the bare file entry.
-  entryUnderPointer(name, target) {
-    if (!name || !target) return null;
-    const { dec, cand } = this.linkCandidates(name, target);
-    if (cand.length <= 1) return cand[0] || null;
-    const onLine = cand.find((e) => new RegExp('[:=]' + e.line + '(?:\\D|$)').test(dec));
-    return onLine || cand.find((e) => e.kind !== 'file') || cand[0];
+  entryUnderPointer(target) {
+    const { url } = splitTarget(target);
+    if (!url) return null;
+    const rel = this.targetIndexedFile(this.decodeTarget(url));
+    const entries = rel ? (this.fileCache.get(rel) || { entries: [] }).entries : [];
+    if (!entries.length) return null;
+    const m = LINE_RE.exec(url);
+    if (!m) return entries[0]; // no line: the file itself
+    const line = parseInt(m[1], 10);
+    // Hover answers "where does this take me?", so it follows the line the link holds —
+    // not its binding, whose business is drift, and not its text, which is prose.
+    return entries.find((e) => e.line === line && e.kind !== 'file')
+      || { name: entries[0].name, path: rel, line, kind: 'line', lang: entries[0].lang };
   }
 
   // CM6 link handler for Live Preview. Suppresses Obsidian's open of the literal
@@ -346,7 +381,10 @@ class CodeLinkerPlugin extends Plugin {
     if (!el || !el.closest || !el.closest('.cm-link')) return null;
     const ref = this.codeRefAt(view, evt.clientX, evt.clientY);
     if (!ref) return null;
-    return /\{root\}|%7Broot%7D/i.test(ref.target) ? this.fillRoot(ref.target) : null;
+    // The url alone: Live Preview reads the raw line, so without splitting the title off
+    // it would travel into the opened URL and the editor would be handed a bad path.
+    const { url } = splitTarget(ref.target);
+    return /\{root\}|%7Broot%7D/i.test(url) ? this.fillRoot(url) : null;
   }
 
   // Absolute base folder the scan paths are resolved against.
@@ -465,10 +503,16 @@ class CodeLinkerPlugin extends Plugin {
   // whose display name matches and whose path appears in it — the shared first step of
   // resolving a link. Callers apply their own tie-break (hover uses the stored line,
   // actualization must not).
-  linkCandidates(name, target) {
-    let dec = this.fillRoot(target);
+  // A link url as a plain comparable path string: {root} filled in, percent-escapes
+  // undone, backslashes normalised.
+  decodeTarget(url) {
+    let dec = this.fillRoot(url);
     try { dec = decodeURIComponent(dec); } catch { /* malformed escape: match on the raw form */ }
-    dec = dec.split('\\').join('/');
+    return dec.split('\\').join('/');
+  }
+
+  linkCandidates(name, target) {
+    const dec = this.decodeTarget(target);
     const named = this.entriesByName(name).filter((e) => e.name === name && pathInTarget(dec, e.path));
     // A shorter path can be a boundary-tail of the real one (Foo.cs inside src/Foo.cs);
     // the longest matching path is the file the link actually points at.
@@ -486,6 +530,62 @@ class CodeLinkerPlugin extends Plugin {
       if ((!best || rel.length > best.length) && pathInTarget(dec, rel)) best = rel;
     }
     return best;
+  }
+
+  // Line hashes for one file, as hash -> line numbers. Kept in memory only: it's derived
+  // from the file, and only files carrying a line binding are ever read, so the on-disk
+  // index cache stays as small as it is.
+  lineMap(rel) {
+    const abs = nodePath.join(this.codeRoot(), rel);
+    let stat;
+    try { stat = fs.statSync(abs); } catch { return null; }
+    const hit = this.lineMaps.get(rel);
+    if (hit && hit.mtimeMs === stat.mtimeMs) return hit.map;
+    let text;
+    try { text = fs.readFileSync(abs, 'utf8'); } catch { return null; }
+    const map = new Map();
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i].trim()) continue; // a blank line anchors nothing
+      const h = hashLine(lines[i]);
+      const a = map.get(h);
+      if (a) a.push(i + 1); else map.set(h, [i + 1]);
+    }
+    this.lineMaps.set(rel, { mtimeMs: stat.mtimeMs, map });
+    return map;
+  }
+
+  // The indexed entries of one file.
+  entriesIn(rel) {
+    return rel ? (this.fileCache.get(rel) || { entries: [] }).entries : [];
+  }
+
+  lineHitsIn(rel, hash) {
+    const map = rel && this.lineMap(rel);
+    return (map && map.get(hash)) || [];
+  }
+
+  // The lines of `rel` meeting every anchor of a binding — anchors are requirements, so
+  // they intersect.
+  bindingHitsIn(rel, b) {
+    const sets = [];
+    if (b.sym) sets.push(this.entriesIn(rel).filter((e) => e.name === b.sym).map((e) => e.line));
+    if (b.kind) sets.push(this.entriesIn(rel).filter((e) => e.kind === b.kind).map((e) => e.line));
+    if (b.hash) sets.push(this.lineHitsIn(rel, b.hash));
+    if (!sets.length) return [];
+    return [...new Set(sets.reduce((a, s) => a.filter((n) => s.includes(n))))];
+  }
+
+  // What a binding says about a spot in `rel`: null when it still sits on a match,
+  // { state: 'stale', line } with where it moved to, or { state: 'broken' } when nothing
+  // in the file meets it any more. One answer for links and embeds alike.
+  bindState(rel, b, storedLine) {
+    return bindStateFrom(this.bindingHitsIn(rel, b), storedLine);
+  }
+
+  // The same, for a link: its url names the file.
+  urlBindState(url, b, storedLine) {
+    return this.bindState(this.targetIndexedFile(this.decodeTarget(url)), b, storedLine);
   }
 
   // The single entry a bare symbol resolves to (a declaration preferred over the file
@@ -816,9 +916,12 @@ class CodeLinkerPlugin extends Plugin {
   // {root} stays in the link for portability (resolved on render/click); call fillRoot()
   // when opening the URI directly. `template` overrides the default preset.
   buildUri(e, template) {
-    const tpl = template || this.settings.uriTemplate;
+    let tpl = template || this.settings.uriTemplate;
     const absFs = this.entryPath(e);
     const absFwd = absFs.split(nodePath.sep).join('/');
+    // A file has no line to open at, so drop {line} along with whatever introduces it —
+    // ":" in the editor presets, "#L" in the permalinks — rather than pointing at ":1".
+    if (e.kind === 'file') tpl = tpl.replace(LINE_TOKEN, '');
     const line = String(e.line || 1);
     const project = (e.path.split('/')[0] || '').trim(); // IDE "project" default
     // 'ask' is resolved before buildUri (per insert); fall back to idea if one slips through.
@@ -849,7 +952,9 @@ class CodeLinkerPlugin extends Plugin {
     return true;
   }
 
-  // The markdown link to insert. Inside a table cell a literal pipe splits the row.
+  // The markdown link to insert: a plain markdown link, nothing more. Tracking is opt-in
+  // — pin the link when you want it, the same way an embed only tracks once you give it a
+  // bind: line. Inside a table cell a literal pipe splits the row.
   buildLink(e, inTable, template) {
     const link = `[${e.name}](${this.buildUri(e, template)})`;
     return inTable ? link.replace(/\|/g, '\\|') : link;
@@ -870,11 +975,12 @@ class CodeLinkerPlugin extends Plugin {
   // A range shows a window of code; add a `context: N` line by hand to pad the others.
   embedFormats(e) {
     const line = e.line || 1;
+    // A whole file has no declaration line to centre on — offer the file itself.
+    if (e.kind === 'file') return [{ label: t('embed.fmt.file'), body: e.path }];
     // A symbol embed is safe only when the name resolves to one file (a file + its own
     // same-named declaration aren't ambiguous — uniqueSymbolEntry handles that).
-    const unique = e.kind !== 'file' && !!this.uniqueSymbolEntry(e.name);
     const out = [];
-    if (unique) out.push({ label: t('embed.fmt.symbol'), body: e.name });
+    if (this.uniqueSymbolEntry(e.name)) out.push({ label: t('embed.fmt.symbol'), body: e.name });
     out.push({ label: t('embed.fmt.line', { line }), body: e.path + ':' + line });
     out.push({ label: t('embed.fmt.range', { from: line, to: line + 10 }), body: e.path + ':' + line + '-' + (line + 10) });
     return out;
@@ -1084,23 +1190,196 @@ class CodeLinkerPlugin extends Plugin {
   }
 
   fixLinkAtCursor(editor, link) {
-    const target = this.actualizedTarget(link.name, link.target);
+    const target = this.actualizedTarget(link.target);
     if (target == null) { new Notice(t('notice.linksUpdated', { n: 0 })); return; }
     editor.replaceRange('[' + link.name + '](' + target + ')', { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
     new Notice(t('notice.linksUpdated', { n: 1 }));
   }
 
-  // Whether a markdown link is one of ours (points at indexed code) rather than a wiki
-  // or web link — true for current, drifted and broken code links alike, so the
-  // right-click copy/fix items only show on links this plugin owns.
-  isCodeLink(name, target) {
-    return !!this.entryUnderPointer(name, target) || !!this.linkState(name, target);
+  // Whether a markdown link is one of ours rather than a wiki or web link. It's the url
+  // that decides, not the text or the binding: a link whose text you rewrote and whose
+  // binding is gone is still ours, and it's exactly the one you'd want to pin.
+  isCodeLink(target) {
+    const { url } = splitTarget(target);
+    return !!url && !!this.targetIndexedFile(this.decodeTarget(url));
+  }
+
+  // A link's file and stored line as { rel, line, text }, or null when it doesn't point
+  // into an indexed file or the line is past its end. `text` is that line's contents —
+  // what a line binding hashes.
+  linkSite(target) {
+    const { url } = splitTarget(target);
+    const m = url && LINE_RE.exec(url);
+    if (!m) return null;
+    const rel = this.targetIndexedFile(this.decodeTarget(url));
+    const line = parseInt(m[1], 10);
+    const text = rel && this.lineTextAt(rel, line);
+    return text == null ? null : { rel, line, text };
+  }
+
+  // One line's text straight from disk, or null when the file or the line isn't there.
+  lineTextAt(rel, line) {
+    let text;
+    try { text = fs.readFileSync(nodePath.join(this.codeRoot(), rel), 'utf8'); } catch { return null; }
+    const lines = text.split('\n');
+    return line >= 1 && line <= lines.length ? lines[line - 1] : null;
+  }
+
+  // A ```code-link block's body with its target line brought up to date, or null when
+  // there's nothing to fix. Only the numbers move: the path is written the way the reader
+  // wrote it (a tail like "http-client.ts" resolves fine), and a range keeps its length.
+  actualizedEmbed(body) {
+    const spec = parseSpec(body.join('\n'));
+    const b = parseBinding(spec.bind);
+    if (!b || spec.lines) return null;
+    const pr = splitPathRange(spec.target);
+    if (!pr) return null;
+    const d = this.bindState(resolvePath(this, pr.path), b, pr.from);
+    if (!d || d.state !== 'stale') return null;
+    const moved = pr.path + ':' + d.line + (pr.single ? '' : '-' + (pr.to + d.line - pr.from));
+    return body.map((l) => (l.trim() === spec.target ? l.replace(spec.target, moved) : l));
+  }
+
+  // What sits on a spot's line: a declaration, or the file's own entry at the top of the
+  // file. The file entry counts — `sym:Player` is satisfied by Player.cs as much as by
+  // class Player, so refusing to offer that pin would make the menu disagree with the marks.
+  declAtSite(site) {
+    const here = this.entriesIn(site.rel).filter((e) => e.line === site.line);
+    return here.find((e) => e.kind !== 'file') || here[0];
+  }
+
+  // What one pin would do: the title it'd produce and the value it pins to, for the menu
+  // to show. Anchors add up rather than replace, so pinning symbol then kind narrows the
+  // same spot. Null when there's nothing to pin to, or when it would change nothing.
+  pinOption(site, current, anchor) {
+    if (!site) return null;
+    const next = Object.assign({ sym: '', kind: '', hash: '' }, parseBinding(current));
+    let value;
+    if (anchor === 'line') {
+      next.hash = hashLine(site.text);
+      value = String(site.line);
+    } else {
+      const decl = this.declAtSite(site);
+      if (!decl) return null;
+      value = anchor === 'sym' ? decl.name : decl.kind;
+      next[anchor] = value;
+    }
+    const title = formatBinding(next);
+    return title === (current || '') ? null : { title, value, site };
+  }
+
+  linkPinOption(link, anchor) {
+    return this.pinOption(this.linkSite(link.target), splitTarget(link.target).title, anchor);
+  }
+
+  // The spot a ```code-link block's window is frozen at — the same shape linkSite gives,
+  // so an embed pins through exactly the code a link does.
+  embedSite(spec) {
+    const pr = splitPathRange(spec.target);
+    if (!pr || spec.lines) return null;
+    const rel = resolvePath(this, pr.path);
+    const text = this.lineTextAt(rel, pr.from);
+    return text == null ? null : { rel, line: pr.from, text };
+  }
+
+  // Put a block's edited body back into its note. An open editor keeps cursor and undo;
+  // in reading view there's none, so the file is rewritten through the vault.
+  async writeEmbedBody(sourcePath, info, body) {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const editor = view && view.editor;
+    if (editor) {
+      editor.replaceRange(body.join('\n') + '\n', { line: info.lineStart + 1, ch: 0 }, { line: info.lineEnd, ch: 0 });
+      return;
+    }
+    const file = this.app.vault.getAbstractFileByPath(sourcePath);
+    if (!file) { new Notice(t('notice.cantBind')); return; }
+    const lines = (await this.app.vault.read(file)).split('\n');
+    lines.splice(info.lineStart + 1, info.lineEnd - info.lineStart - 1, ...body);
+    await this.app.vault.modify(file, lines.join('\n'));
+  }
+
+  pinLink(editor, link, anchor) {
+    const p = this.linkPinOption(link, anchor);
+    if (!p) { new Notice(t('notice.cantBind')); return; }
+    this.retitleLink(editor, link, p.title);
+    new Notice(t('notice.bound', { line: p.site.line }));
+  }
+
+  // Drop a link's binding. Nothing tracks it, nothing marks it, nothing rewrites it — it
+  // goes back to being an ordinary markdown link that happens to point at code.
+  unbindLink(editor, link) {
+    this.retitleLink(editor, link, '');
+    new Notice(t('notice.unbound'));
+  }
+
+  linkAtCursorBound(link) {
+    return !!parseBinding(splitTarget(link.target).title);
+  }
+
+  retitleLink(editor, link, title) {
+    const { url } = splitTarget(link.target);
+    const out = '[' + link.name + '](' + withTitle(url, title) + ')';
+    editor.replaceRange(out, { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
+  }
+
+  // setSubmenu landed after the manifest's minAppVersion, so ask a throwaway menu rather
+  // than assume: on older builds the pins fall back to flat items instead of vanishing.
+  submenuSupported() {
+    if (this._submenu == null) {
+      this._submenu = false;
+      try { new Menu().addItem((i) => { this._submenu = typeof i.setSubmenu === 'function'; }); } catch { /* older API */ }
+    }
+    return this._submenu;
+  }
+
+  // The pins, in a submenu: they're a set, and they'd crowd the menu otherwise. Each is
+  // labelled with what it would pin to — "symbol" and "kind" mean nothing until you see
+  // Player and class.
+  addPinItems(menu, option, run) {
+    const opts = ['sym', 'kind', 'line'].map((a) => [a, option(a)]).filter(([, o]) => o);
+    if (!opts.length) return;
+    const add = (m, a, o) => m.addItem((i) =>
+      i.setTitle(t('menu.pin.' + a, { value: o.value })).setIcon('pin').onClick(() => run(a)));
+    if (!this.submenuSupported()) { for (const [a, o] of opts) add(menu, a, o); return; }
+    menu.addItem((item) => {
+      item.setTitle(t('menu.pin')).setIcon('pin');
+      const sub = item.setSubmenu();
+      for (const [a, o] of opts) add(sub, a, o);
+    });
+  }
+
+  // A right-click item on the code link under the cursor, mirrored into the palette so
+  // every one of them is reachable without the mouse. `can` gates both.
+  addLinkCommand(id, name, can, run) {
+    this.addCommand({
+      id,
+      name,
+      editorCheckCallback: (checking, editor) => {
+        const link = this.codeLinkAtCursor(editor);
+        if (!link || !this.isCodeLink(link.target) || !can(link)) return false;
+        if (!checking) run(editor, link);
+        return true;
+      },
+    });
+  }
+
+  // Insert a link to a chosen line of a chosen file — for pointing at something the index
+  // has no name for. Like any insert it leaves the link unbound; pin it to track it.
+  insertLineLink(editor, template) {
+    this.pickEntry((e) => new LinePromptModal(this.app, e.line || 1, (line) => {
+      // A line was asked for, so the entry has one even when it's the file itself.
+      const at = Object.assign({}, e, { line, kind: e.kind === 'file' ? 'line' : e.kind });
+      const link = '[' + e.name + ':' + line + '](' + this.buildUri(at, template) + ')';
+      const inTable = inTableCell(editor.getValue(), editor.posToOffset(editor.getCursor('from')));
+      editor.replaceSelection(inTable ? link.replace(/\|/g, '\\|') : link);
+    }).open());
   }
 
   // Copy the clicked link's own target ({root} filled in), keeping the scheme it was
   // saved with — unlike copyLink, which builds a fresh link from the default preset.
   copyLinkAtCursor(link) {
-    navigator.clipboard.writeText(this.fillRoot(link.target));
+    // The url alone — the binding title is ours, and has no business on someone's clipboard.
+    navigator.clipboard.writeText(this.fillRoot(splitTarget(link.target).url));
     new Notice(t('notice.copied'));
   }
 

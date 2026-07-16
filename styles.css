@@ -15,7 +15,7 @@ settings:
   -
     id: code-linker-stale-color
     title: Stale-link underline colour
-    description: Links whose stored line has drifted from the declaration. Default follows the theme's warning colour.
+    description: Pinned links and embeds whose code has moved — the update commands can fix them. Default follows the theme's warning colour.
     type: variable-themed-color
     format: hex
     opacity: false
@@ -24,7 +24,7 @@ settings:
   -
     id: code-linker-broken-color
     title: Broken-link underline colour
-    description: Links whose symbol was renamed or removed. Default follows the theme's error colour.
+    description: Pinned links and embeds whose pin no longer matches anything — renamed, removed, or the line rewritten. Default follows the theme's error colour.
     type: variable-themed-color
     format: hex
     opacity: false
@@ -235,6 +235,12 @@ settings:
 }
 .code-linker-stale { border-bottom-color: var(--code-linker-stale-color, var(--text-warning)); }
 .code-linker-broken { border-bottom-color: var(--code-linker-broken-color, var(--text-error)); }
+
+/* A pinned embed whose code moved is showing the wrong lines, so it says so: the header
+   is tinted and a note under the snippet explains. Same colours as the link marks, but
+   their own classes — an embed is a block, and the links' underline doesn't suit it. */
+.code-linker-embed-stale { color: var(--code-linker-stale-color, var(--text-warning)); }
+.code-linker-embed-broken { color: var(--code-linker-broken-color, var(--text-error)); }
 
 /* Nested sub-rows — searchable kinds under a language, and chosen folders under a
    folder list — share one indent and compact height so the pane reads as one list

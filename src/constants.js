@@ -115,10 +115,13 @@ const LANGUAGES_TEMPLATE = `[
 
 // Whether a relative path appears in a (decoded, forward-slashed) link target at a
 // segment boundary — so "Foo.cs" doesn't falsely match the tail of "src/Foo.cs".
+// A boundary is anything a path segment can't contain: templates put {path} after a
+// slash, but also after "=" (JetBrains' "path={path}", a custom "file={abs}").
+const PATH_CHAR = /[A-Za-z0-9_.-]/;
 function pathInTarget(dec, p) {
   let from = 0, i;
   while ((i = dec.indexOf(p, from)) !== -1) {
-    if (i === 0 || dec[i - 1] === '/') return true;
+    if (i === 0 || !PATH_CHAR.test(dec[i - 1])) return true;
     from = i + 1;
   }
   return false;

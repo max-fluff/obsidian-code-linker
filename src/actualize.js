@@ -1,44 +1,48 @@
 'use strict';
 
-// Keeping stored links current with the code. A link freezes the declaration's line
-// at insert time; as code moves, that line drifts. These helpers re-resolve a link by
-// its symbol name + path against the live index, mark the drifted ones, and (on an
-// explicit command) rewrite the stale line number. Nothing is rewritten automatically.
+// Keeping stored links current with the code. A link freezes a line at insert time; as
+// code moves, that line drifts. These helpers re-resolve a link against the live index,
+// mark the drifted ones, and (on an explicit command) rewrite the line. Nothing is
+// rewritten automatically.
+//
+// Only a pinned link is tracked: its title says what it holds on to (see shared/binding).
+// An unpinned one is left alone — never marked, never rewritten. Nothing is inferred from
+// the link's text, which is the reader's prose.
 
 const { Notice, MarkdownView } = require('obsidian');
 const { ViewPlugin, Decoration } = require('@codemirror/view');
 const { RangeSetBuilder, StateEffect } = require('@codemirror/state');
 const { syntaxTree } = require('@codemirror/language');
-const { linkRegex, isFenceLine, inInlineCode } = require('./shared/markdown');
+const { linkRegex, splitTarget, withTitle, rewriteLinks, rewriteFences } = require('./shared/markdown');
+const { LINE_RE, parseBinding, formatBinding } = require('./shared/binding');
 const { t } = require('./shared/i18n');
 
-// The line lives as the last :<digits> before the end; relative code paths carry no
-// colon, so it's unambiguous. Not global, so replace() only touches that one number.
-const LINE_RE = /:(\d+)(?=\D*$)/;
 // CM6 syntax-node names for contexts where a link is example text, not a live link.
 const SKIP_NODE = /code|comment|frontmatter/i;
+const EMBED_LANG = 'code-link';
 
-// Rewrite stale line numbers in `text`, skipping links inside code (fenced or inline)
-// where they're example text, not live links. Returns { text, count }.
-function updateLinksInText(plugin, text) {
-  const lines = text.split('\n');
-  let fenced = false, count = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (isFenceLine(lines[i])) { fenced = !fenced; continue; }
-    if (fenced) continue;
-    lines[i] = lines[i].replace(linkRegex(), (whole, name, target, offset) => {
-      if (inInlineCode(lines[i], offset)) return whole;
-      const fixed = plugin.actualizedTarget(name, target);
-      if (fixed == null) return whole;
-      count++;
-      return '[' + name + '](' + fixed + ')';
-    });
-  }
-  return { text: lines.join('\n'), count };
-}
+const updateLinksInText = (plugin, text) => {
+  const links = rewriteLinks(text, (name, target) => {
+    const fixed = plugin.actualizedTarget(target);
+    return fixed == null ? null : '[' + name + '](' + fixed + ')';
+  });
+  const embeds = rewriteFences(links.text, EMBED_LANG, (body) => plugin.actualizedEmbed(body));
+  return { text: embeds.text, count: links.count + embeds.count };
+};
 
-// A CM6 refresh signal, dispatched when the index changes so Live Preview re-scans
-// stale marks without waiting for the next edit or scroll.
+// Pin every unpinned link to the symbol on its line — how notes written before pinning
+// existed get their tracking back, in one go. A link that already carries a title is left
+// alone: it's either pinned, or a tooltip that's none of our business.
+const pinLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
+  const { url, title } = splitTarget(target);
+  if (title) return null;
+  const site = plugin.linkSite(target);
+  const decl = site && plugin.declAtSite(site);
+  return decl ? '[' + name + '](' + withTitle(url, formatBinding({ sym: decl.name })) + ')' : null;
+});
+
+// A CM6 refresh signal, dispatched when the index changes so Live Preview re-scans stale
+// marks without waiting for the next edit or scroll.
 const refreshEffect = StateEffect.define();
 
 function refreshStaleLinks(app) {
@@ -48,9 +52,9 @@ function refreshStaleLinks(app) {
   });
 }
 
-// Live Preview underline for links whose line has drifted. Links inside code (fenced or
-// inline) are skipped via the syntax tree — they're example text, not live links, so the
-// note/vault commands won't touch them and marking them would mislead.
+// Live Preview underline for drifted links. Links inside code are skipped via the syntax
+// tree — they're example text, so the commands won't touch them and marking them would
+// only mislead.
 function staleLinksExtension(plugin) {
   const marks = {
     stale: Decoration.mark({ class: 'code-linker-stale' }),
@@ -69,7 +73,7 @@ function staleLinksExtension(plugin) {
           const end = start + m[0].length;
           let inCodeNode = false;
           tree.iterate({ from: start, to: end, enter: (n) => { if (SKIP_NODE.test(n.type.name)) inCodeNode = true; } });
-          const state = inCodeNode ? null : plugin.linkState(m[1], m[2]);
+          const state = inCodeNode ? null : plugin.linkState(m[2]);
           if (state) builder.add(start, end, marks[state]);
         }
       }
@@ -88,81 +92,66 @@ function staleLinksExtension(plugin) {
   );
 }
 
+// What a link's binding says about where it points, or null when there's nothing to
+// judge: no line, or no binding to judge it against.
+function bindStateOf(plugin, target) {
+  const { url, title } = splitTarget(target);
+  const m = url && LINE_RE.exec(url);
+  const b = parseBinding(title);
+  return m && b ? plugin.urlBindState(url, b, parseInt(m[1], 10)) : null;
+}
+
 // Mixed into the plugin prototype (like api.js); `this` is the plugin.
 const methods = {
-  // A stored link resolved to its live entry, or null when it can't be safely
-  // actualized (no line, not a code link, or an ambiguous name in the file). Unlike
-  // entryUnderPointer it never uses the stored line to disambiguate — that would hide
-  // the very drift we're detecting.
-  resolveStoredLink(name, target) {
-    if (!name || !target) return null;
-    const m = LINE_RE.exec(target);
-    if (!m) return null;
-    const storedLine = parseInt(m[1], 10);
-    const { cand } = this.linkCandidates(name, target);
-    const decls = cand.filter((e) => e.kind !== 'file');
-    let entry;
-    if (decls.length === 1) entry = decls[0];
-    else if (!decls.length && cand.length === 1) entry = cand[0];
-    else return null;
-    return { entry, storedLine, currentLine: entry.line };
+  linkState(target) {
+    const r = bindStateOf(this, target);
+    return r ? r.state : null;
   },
 
-  isLinkStale(name, target) {
-    const r = this.resolveStoredLink(name, target);
-    return !!r && r.currentLine !== r.storedLine;
+  isLinkStale(target) {
+    return this.linkState(target) === 'stale';
   },
 
-  // Freshness of a code link for the visual marks: 'stale' (line drifted, fixable),
-  // 'broken' (its file is still indexed but the symbol is gone — renamed or removed),
-  // or null (current, ambiguous, not a code link, or unrelated — nothing to mark).
-  linkState(name, target) {
-    if (!name || !target) return null;
-    if (!LINE_RE.test(target)) return null; // no line: not a tracked code link
-    const r = this.resolveStoredLink(name, target);
-    if (r) return r.currentLine === r.storedLine ? null : 'stale';
-    // Didn't resolve. If the target still points at an indexed file, the symbol was
-    // renamed or removed → broken; otherwise it's an unrelated link → leave it alone.
-    const { dec, cand } = this.linkCandidates(name, target);
-    if (cand.length) return null; // name matched but ambiguous in the file — don't guess
-    return this.targetIndexedFile(dec) ? 'broken' : null;
+  // The link target with its line corrected, or null when there's nothing to fix. Shared
+  // by the note/vault commands and the right-click fix.
+  actualizedTarget(target) {
+    const r = bindStateOf(this, target);
+    if (!r || r.state !== 'stale') return null;
+    const { url, title } = splitTarget(target);
+    return withTitle(url.replace(LINE_RE, ':' + r.line), title);
   },
 
-  // The link target with its line corrected to the current declaration, or null when
-  // there's nothing to fix. Shared by the vault/note commands and the right-click fix.
-  actualizedTarget(name, target) {
-    const r = this.resolveStoredLink(name, target);
-    if (!r || r.currentLine === r.storedLine) return null;
-    return target.replace(LINE_RE, ':' + r.currentLine);
-  },
-
-  // Works in both edit and reading view: an open editor keeps cursor/undo, otherwise
-  // the active file is rewritten through the vault.
-  async updateLinksInActiveNote() {
+  // An open editor keeps cursor and undo; in reading view there's none, so the active
+  // file is rewritten through the vault.
+  async rewriteActiveNote(transform, noticeKey) {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     const editor = view && view.editor;
     if (editor) {
-      const { text, count } = updateLinksInText(this, editor.getValue());
+      const { text, count } = transform(this, editor.getValue());
       if (count) { const cur = editor.getCursor(); editor.setValue(text); editor.setCursor(cur); }
-      new Notice(t('notice.linksUpdated', { n: count }));
+      new Notice(t(noticeKey, { n: count }));
       return;
     }
     const file = this.app.workspace.getActiveFile();
-    if (!file) { new Notice(t('notice.linksUpdated', { n: 0 })); return; }
-    const { text, count } = updateLinksInText(this, await this.app.vault.read(file));
+    if (!file) { new Notice(t(noticeKey, { n: 0 })); return; }
+    const { text, count } = transform(this, await this.app.vault.read(file));
     if (count) await this.app.vault.modify(file, text);
-    new Notice(t('notice.linksUpdated', { n: count }));
+    new Notice(t(noticeKey, { n: count }));
   },
 
-  async updateLinksInVault() {
+  async rewriteVault(transform, noticeKey) {
     let files = 0, total = 0;
     for (const f of this.app.vault.getMarkdownFiles()) {
-      const src = await this.app.vault.read(f);
-      const { text, count } = updateLinksInText(this, src);
+      const { text, count } = transform(this, await this.app.vault.read(f));
       if (count) { await this.app.vault.modify(f, text); files++; total += count; }
     }
-    new Notice(t('notice.linksUpdatedVault', { n: total, files }));
+    new Notice(t(noticeKey, { n: total, files }));
   },
+
+  updateLinksInActiveNote() { return this.rewriteActiveNote(updateLinksInText, 'notice.linksUpdated'); },
+  updateLinksInVault() { return this.rewriteVault(updateLinksInText, 'notice.linksUpdatedVault'); },
+  pinLinksInActiveNote() { return this.rewriteActiveNote(pinLinksInText, 'notice.linksPinned'); },
+  pinLinksInVault() { return this.rewriteVault(pinLinksInText, 'notice.linksPinnedVault'); },
 };
 
 module.exports = { methods, staleLinksExtension, refreshStaleLinks };

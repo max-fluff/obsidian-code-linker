@@ -5,9 +5,10 @@
 // tracks the declaration as code moves) or an explicit path with a line/range. The
 // block re-renders on every index change, so an open embed follows edits on disk.
 
-const { MarkdownRenderChild, Menu } = require('obsidian');
+const { MarkdownRenderChild, Menu, Notice } = require('obsidian');
 const nodePath = require('path');
 const { readLines, renderCode } = require('./render');
+const { parseBinding } = require('./shared/binding');
 const { t } = require('./shared/i18n');
 
 const EMBED_LANG = 'code-link';
@@ -15,11 +16,11 @@ const MAX_EMBED_LINES = 400; // bound how much a single embed can pour into the 
 
 // First non-empty line is the target; later "key: value" lines are modifiers.
 function parseSpec(source) {
-  const spec = { target: '', context: '', lines: '', title: '' };
+  const spec = { target: '', context: '', lines: '', title: '', bind: '' };
   for (const raw of source.split('\n')) {
     const line = raw.trim();
     if (!line) continue;
-    const m = /^(context|lines|title)\s*:\s*(.*)$/i.exec(line);
+    const m = /^(context|lines|title|bind)\s*:\s*(.*)$/i.exec(line);
     if (m) spec[m[1].toLowerCase()] = m[2].trim();
     else if (!spec.target) spec.target = line;
   }
@@ -46,6 +47,14 @@ function splitPathRange(t) {
   const from = parseInt(m[2], 10);
   const to = m[3] ? parseInt(m[3], 10) : from;
   return { path: m[1], from: Math.min(from, to), to: Math.max(from, to), single: !m[3] };
+}
+
+// A block's bind: line, replaced, added, or (with an empty title) dropped. Everything
+// else in the spec is the reader's and stays put.
+function setBindLine(body, title) {
+  const out = body.filter((l) => !/^\s*bind\s*:/i.test(l));
+  if (title) out.push('bind: ' + title);
+  return out;
 }
 
 const looksLikePath = (s) => s.includes('/') || s.includes('\\') || /\.[a-z0-9]+$/i.test(s);
@@ -91,13 +100,22 @@ function fromPath(plugin, spec, relPath, from, to, targetLine) {
   return build(plugin, relPath, langForPath(plugin, relPath), from, to, targetLine, null);
 }
 
+// A bind: line says what an embed's window was pinned to, so drift can be reported the
+// same way a link's is. Only an explicit path:line spec can drift — a symbol target
+// re-resolves on every render, and a "lines:" override means the reader took the wheel.
+function withDrift(plugin, spec, res, pinnedLine) {
+  const b = parseBinding(spec.bind);
+  if (b && res.relPath && !spec.lines) res.drift = plugin.bindState(res.relPath, b, pinnedLine);
+  return res;
+}
+
 // Resolve a parsed spec to a render target, or { error } for the inline notice.
 function resolve(plugin, spec) {
   const target = spec.target;
   if (!target) return { error: t('embed.empty') };
 
   const pr = splitPathRange(target);
-  if (pr) return fromPath(plugin, spec, pr.path, pr.from, pr.to, pr.single ? pr.from : null);
+  if (pr) return withDrift(plugin, spec, fromPath(plugin, spec, pr.path, pr.from, pr.to, pr.single ? pr.from : null), pr.from);
   if (looksLikePath(target)) return fromPath(plugin, spec, target, null, null, null);
 
   // A "py:"/"def:" filter narrows a name that collides across files (a dotted "Foo.bar"
@@ -116,10 +134,11 @@ function resolve(plugin, spec) {
 }
 
 class CodeEmbed extends MarkdownRenderChild {
-  constructor(containerEl, plugin, spec) {
+  constructor(containerEl, plugin, spec, ctx) {
     super(containerEl);
     this.plugin = plugin;
     this.spec = spec;
+    this.ctx = ctx; // getSectionInfo finds this block back in the note, so pins can edit it
     this.renderId = 0;
   }
 
@@ -150,7 +169,30 @@ class CodeEmbed extends MarkdownRenderChild {
     const menu = new Menu();
     if (res.entry) menu.addItem((i) => i.setTitle(t('embed.menu.open')).setIcon('go-to-file').onClick(() => this.open()));
     menu.addItem((i) => i.setTitle(t('embed.menu.refresh')).setIcon('refresh-cw').onClick(() => this.render(true)));
+    // The same pins a link gets: an embed frozen to a line drifts exactly like one.
+    const p = this.plugin;
+    const site = p.embedSite(this.spec);
+    p.addPinItems(menu, (a) => p.pinOption(site, this.spec.bind, a), (a) => this.pin(a));
+    if (parseBinding(this.spec.bind)) {
+      menu.addItem((i) => i.setTitle(t('menu.unpin')).setIcon('pin-off').onClick(() => this.setBind('')));
+    }
     menu.showAtMouseEvent(evt);
+  }
+
+  pin(anchor) {
+    const o = this.plugin.pinOption(this.plugin.embedSite(this.spec), this.spec.bind, anchor);
+    if (!o) { new Notice(t('notice.cantBind')); return; }
+    this.setBind(o.title);
+  }
+
+  // Rewrite this block's bind: line in the note itself. getSectionInfo gives the fence's
+  // line range, which is the only way back from a rendered block to its source.
+  async setBind(title) {
+    const info = this.ctx.getSectionInfo && this.ctx.getSectionInfo(this.containerEl);
+    if (!info) { new Notice(t('notice.cantBind')); return; }
+    const body = info.text.split('\n').slice(info.lineStart + 1, info.lineEnd);
+    await this.plugin.writeEmbedBody(this.ctx.sourcePath, info, setBindLine(body, title));
+    new Notice(title ? t('notice.bound', { line: this.res.from }) : t('notice.unbound'));
   }
 
   notice(cls, text) {
@@ -170,8 +212,9 @@ class CodeEmbed extends MarkdownRenderChild {
     // (plus the resolved window) tells us whether *this* embed's content actually moved.
     const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
     const mtime = cached ? cached.mtimeMs : null;
+    const drift = res.drift ? res.drift.state + (res.drift.line || '') : '';
     const sig = res.error ? 'err:' + res.error
-      : res.absPath + '|' + res.from + '|' + res.to + '|' + res.targetLine + '|' + mtime;
+      : res.absPath + '|' + res.from + '|' + res.to + '|' + res.targetLine + '|' + mtime + '|' + drift;
     if (!force && sig === this.lastSig && (res.error || mtime != null)) return;
     this.lastSig = sig;
 
@@ -189,6 +232,9 @@ class CodeEmbed extends MarkdownRenderChild {
     const header = el.createDiv({ cls: 'code-linker-embed-header mod-clickable' });
     header.createSpan({ text: this.spec.title || res.relPath + ':' + (start === end ? start : start + '-' + end) });
     header.addEventListener('click', () => this.open());
+    // The window is frozen where the spec says, so a drifted embed is showing the wrong
+    // code — mark the header the way a drifted link is marked, and say what to do.
+    if (res.drift) header.classList.add('code-linker-embed-' + res.drift.state);
 
     const body = el.createDiv({ cls: 'code-linker-embed-body' });
     if (res.targetLine != null) {
@@ -199,14 +245,20 @@ class CodeEmbed extends MarkdownRenderChild {
       }
     }
     await renderCode(body, snippet.lines.join('\n'), res.prismId);
+    if (res.drift) {
+      el.createDiv({
+        cls: 'code-linker-embed-note code-linker-embed-' + res.drift.state,
+        text: res.drift.state === 'stale' ? t('embed.stale', { line: res.drift.line }) : t('embed.broken'),
+      });
+    }
     if (res.truncated) el.createDiv({ cls: 'code-linker-embed-note', text: t('embed.truncated', { max: MAX_EMBED_LINES }) });
   }
 }
 
 function registerEmbed(plugin) {
   plugin.registerMarkdownCodeBlockProcessor(EMBED_LANG, (source, el, ctx) => {
-    ctx.addChild(new CodeEmbed(el, plugin, parseSpec(source)));
+    ctx.addChild(new CodeEmbed(el, plugin, parseSpec(source), ctx));
   });
 }
 
-module.exports = { registerEmbed };
+module.exports = { registerEmbed, parseSpec, splitPathRange, resolvePath };

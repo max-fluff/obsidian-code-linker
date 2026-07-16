@@ -100,7 +100,7 @@ Selection-driven commands resolve the selected name or path (or the token under 
 - **Find and convert to link** — replace the selection with a link.
 - **Find and open code** — open the matching file in your editor.
 
-Right-clicking an existing code link (rather than a plain selection) adds link-specific items: **Copy code link** copies that link's resolved target to the clipboard (`{root}` filled in), and **Update this code link** appears when its stored line has drifted (see [Keeping links current](#keeping-links-current)).
+Right-clicking an existing code link (rather than a plain selection) adds link-specific items: **Copy code link** copies that link's resolved target to the clipboard (`{root}` filled in), a **Pin this code link** submenu chooses what it should track, **Unpin** stops tracking, and **Update this code link** appears once a pinned link has drifted (see [Keeping links current](#keeping-links-current)). Right-clicking a rendered embed offers the same pins.
 
 <p align="center">
   <img src="docs/images/context-menu-1.png" alt="The editor right-click menu showing Find and convert to link and Find and open code" width="420">
@@ -148,11 +148,45 @@ Embeds re-render whenever the index rebuilds, so with **Auto-refresh index** on,
 
 ### Keeping links current
 
-An inserted link stores the declaration's line at the moment you inserted it. As the code moves, that line drifts. Two things help:
+A link stores the line as it was when you inserted it. As the code moves, that line drifts. Tracking is opt-in: **pin** a link and the plugin will watch it. Nothing else is touched — an unpinned link is never marked and never rewritten.
 
-- **Mark stale links** (on by default) underlines code links that need attention, in both reading view and live preview: a **warning-coloured** underline when the stored line has drifted from the declaration, and an **error-coloured** one when the link's file is still indexed but the symbol is gone — renamed or removed (a drift the line-fix can't repair; you update the link text yourself).
-- **Update code links in this note** / **Update code links in the whole vault** re-resolve each link by its symbol name and path and rewrite the drifted line number. Only links that resolve to a single index entry are touched; anything ambiguous or unrelated is left exactly as it was. Links without a line (the `file://` preset) have nothing to update.
-- Right-click a drifted link in the editor and choose **Update this code link** to fix just that one.
+Right-click a code link (or use the command palette) and choose what it should hold on to. The pins add up, so you can pin as tightly as you mean:
+
+| Pin | Written as | The line must… |
+| --- | --- | --- |
+| **Pin to symbol “Player”** | `sym:Player` | declare something called `Player` |
+| **Pin to kind “class”** | `kind:class` | declare a class |
+| **Pin to this exact line** | `line:16ay76l` | still read the way it read when you pinned it |
+
+They land in the link's markdown title, not its text:
+
+```markdown
+[the player](vscode://file/{root}/src/Player.cs:4 "sym:Player kind:class")
+```
+
+So **the text is yours** — rename it to anything and the link still tracks. A title that isn't a pin (your own tooltip) is left alone.
+
+The pins have opposite weak spots, which is why you can combine them: a symbol survives edits to its own line but not a rename; a line survives a rename but not being rewritten.
+
+Once pinned:
+
+- **Mark stale links** (on by default) underlines pinned links that need attention, in reading view and live preview alike: a **warning-coloured** underline when the code moved (fixable), and an **error-coloured** one when nothing in the file meets the pin any more — renamed, removed, or the line rewritten.
+- **Update code links in this note** / **…in the whole vault** rewrite drifted lines to where the code went. Moving to another line matching the pin is not drift: a link pinned to `sym:TakeDamage` is happy on either `TakeDamage`.
+- Right-click a drifted link and choose **Update this code link** to fix just that one.
+- **Unpin this code link** stops the tracking. Moved a line on purpose? Pin it again — the new pin replaces the argument.
+
+Notes written before pinning existed can catch up in one go: **Pin unpinned code links in this note** / **…in the whole vault** pins every link whose text names the symbol on its line.
+
+Embeds work the same way, with the pin written as a `bind:` line:
+
+````markdown
+```code-link
+src/Player.cs:9
+bind: sym:TakeDamage line:1xg3bnk
+```
+````
+
+A symbol embed (`TakeDamage` on its own) re-resolves on every render and needs no pin. One frozen to a `path:line` or a range does — pin it from the block's right-click menu, and the update commands will keep it honest. A drifted embed says so in its header, since the snippet it shows is no longer the code you meant.
 
 ## Languages
 
@@ -199,10 +233,13 @@ Each enabled language lists the entity kinds it actually put in the index (e.g. 
 - **Insert code link as…** — insert one link with a one-off editor choice, leaving the default alone.
 - **Open code file** — open the picked file without inserting.
 - **Copy code link** — copy a link with `{root}` resolved to the absolute path (copied links usually land outside the vault).
+- **Insert code link to a line** — pick a file, then a line, for something the index has no name for.
 - **Insert code embed** — insert a `code-link` block, choosing the format (by symbol, declaration line, or line range).
 - **Convert selection to code link** / **Find and open code** — resolve the selection against the index, then convert it or open the file (one match acts directly, several open the picker).
 - **Switch editor preset** — change the default editor without opening settings.
-- **Update code links in this note** / **Update code links in the whole vault** — rewrite drifted line numbers (see [Keeping links current](#keeping-links-current)).
+- With the cursor on a code link: **Pin code link to its symbol / kind / exact line**, **Unpin code link**, **Update this code link**, **Copy code link** (see [Keeping links current](#keeping-links-current)).
+- **Update code links in this note** / **…in the whole vault** — rewrite drifted lines in pinned links and embeds.
+- **Pin unpinned code links in this note** / **…in the whole vault** — catch up notes written before pinning existed.
 - **Rebuild code index**.
 
 The selection commands and the link actions are also in the editor's right-click menu — see [Selection commands and the context menu](#selection-commands-and-the-context-menu).
@@ -244,7 +281,7 @@ The selection commands and the link actions are also in the editor's right-click
 **Stale links**
 | Setting | Default | What it does |
 | --- | --- | --- |
-| **Mark stale links** | on | Underline code links whose stored line has drifted (warning colour) or whose symbol is gone (error colour). See [Keeping links current](#keeping-links-current). |
+| **Mark stale links** | on | Underline pinned links whose code moved (warning colour) or whose pin no longer matches anything (error colour). Unpinned links are never marked. See [Keeping links current](#keeping-links-current). |
 
 **Scan vs. skip folders.** *Scan folders* say where indexing **starts** — specific paths relative to the code root; leave the list empty to scan the whole code root. *Skip folders* then **prune** what's found, and take two forms:
 
@@ -352,7 +389,7 @@ In an existing clone without the submodule, run `git submodule update --init` fi
 - `hover.js` — the file-snippet popover shown on hover.
 - `embed.js` — the inline ` ```code-link ` block renderer.
 - `render.js` — Prism-highlighted snippet rendering shared by hover and embeds.
-- `actualize.js` — stale-link detection and the "Update code links" actions.
+- `actualize.js` — drift detection for pinned links and embeds, and the "Update code links" actions.
 - `api.js` — the public API mixed into the plugin prototype.
 - `constants.js` — defaults and URI presets.
 - `git.js` — reads `.git` to resolve a file's remote/commit/branch for the permalink presets.

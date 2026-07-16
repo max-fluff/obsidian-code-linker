@@ -12,6 +12,15 @@ var require_markdown = __commonJS({
     var splitLines2 = (s) => (s || "").split("\n").map((x) => x.trim()).filter(Boolean);
     var LINK_PATTERN = "\\[([^\\]]*)\\]\\(([^)]+)\\)";
     var linkRegex2 = () => new RegExp(LINK_PATTERN, "g");
+    var LINK_TITLE = /^([\s\S]*?)\s+(?:"([^"]*)"|'([^']*)')$/;
+    function splitTarget2(raw) {
+      const s = String(raw == null ? "" : raw).trim();
+      const m = LINK_TITLE.exec(s);
+      if (!m)
+        return { url: s, title: "" };
+      return { url: m[1].trim(), title: m[2] != null ? m[2] : m[3] };
+    }
+    var withTitle2 = (url, title) => title ? url + ' "' + title + '"' : url;
     var isFenceLine = (line) => {
       const s = line.trimStart();
       return s.startsWith("```") || s.startsWith("~~~");
@@ -75,7 +84,51 @@ var require_markdown = __commonJS({
           return true;
       return false;
     }
-    module2.exports = { splitLines: splitLines2, linkRegex: linkRegex2, isFenceLine, inInlineCode, locate, inCode: inCode2, inLink: inLink2, isProtected, inTableCell: inTableCell2 };
+    function rewriteLinks(text, fn) {
+      const lines = text.split("\n");
+      let fenced = false, count = 0;
+      for (let i = 0; i < lines.length; i++) {
+        if (isFenceLine(lines[i])) {
+          fenced = !fenced;
+          continue;
+        }
+        if (fenced)
+          continue;
+        lines[i] = lines[i].replace(linkRegex2(), (whole, name, target, offset) => {
+          if (inInlineCode(lines[i], offset))
+            return whole;
+          const out = fn(name, target);
+          if (out == null)
+            return whole;
+          count++;
+          return out;
+        });
+      }
+      return { text: lines.join("\n"), count };
+    }
+    function rewriteFences(text, lang, fn) {
+      const lines = text.split("\n");
+      let count = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const open = new RegExp("^\\s*(`{3,}|~{3,})\\s*" + lang + "\\s*$").exec(lines[i]);
+        if (!open)
+          continue;
+        const close = new RegExp("^\\s*" + open[1][0] + "{" + open[1].length + ",}\\s*$");
+        let j = i + 1;
+        while (j < lines.length && !close.test(lines[j]))
+          j++;
+        const body = lines.slice(i + 1, j);
+        const out = fn(body);
+        if (out) {
+          lines.splice(i + 1, body.length, ...out);
+          count++;
+          j = i + 1 + out.length;
+        }
+        i = j;
+      }
+      return { text: lines.join("\n"), count };
+    }
+    module2.exports = { splitLines: splitLines2, linkRegex: linkRegex2, splitTarget: splitTarget2, withTitle: withTitle2, rewriteLinks, rewriteFences, isFenceLine, inInlineCode, locate, inCode: inCode2, inLink: inLink2, isProtected, inTableCell: inTableCell2 };
   }
 });
 
@@ -209,16 +262,67 @@ var require_constants = __commonJS({
   }
 ]
 `;
+    var PATH_CHAR = /[A-Za-z0-9_.-]/;
     function pathInTarget2(dec, p) {
       let from = 0, i;
       while ((i = dec.indexOf(p, from)) !== -1) {
-        if (i === 0 || dec[i - 1] === "/")
+        if (i === 0 || !PATH_CHAR.test(dec[i - 1]))
           return true;
         from = i + 1;
       }
       return false;
     }
     module2.exports = { PRESETS: PRESETS2, PRISM_LANG: PRISM_LANG2, JETBRAINS_PRODUCTS: JETBRAINS_PRODUCTS2, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, LANGUAGES_TEMPLATE: LANGUAGES_TEMPLATE2, parseSkip: parseSkip2, underSkip: underSkip2, pathInTarget: pathInTarget2 };
+  }
+});
+
+// src/shared/binding.js
+var require_binding = __commonJS({
+  "src/shared/binding.js"(exports2, module2) {
+    "use strict";
+    var TOKEN = /^(sym|kind|line):(.+)$/;
+    var LINE_RE2 = /:(\d+)(?=\D*$)/;
+    function hashLine2(text) {
+      let h = 2166136261;
+      const s = String(text || "").trim();
+      for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619) >>> 0;
+      }
+      return h.toString(36);
+    }
+    function parseBinding2(title) {
+      const s = String(title || "").trim();
+      if (!s)
+        return null;
+      const b = { sym: "", kind: "", hash: "" };
+      for (const word of s.split(/\s+/)) {
+        const m = TOKEN.exec(word);
+        if (!m)
+          return null;
+        b[m[1] === "line" ? "hash" : m[1]] = m[2];
+      }
+      return b.sym || b.kind || b.hash ? b : null;
+    }
+    function formatBinding2(b) {
+      const parts = [];
+      if (b.sym)
+        parts.push("sym:" + b.sym);
+      if (b.kind)
+        parts.push("kind:" + b.kind);
+      if (b.hash)
+        parts.push("line:" + b.hash);
+      return parts.join(" ");
+    }
+    function bindStateFrom2(hits, storedLine) {
+      if (hits.includes(storedLine))
+        return null;
+      if (!hits.length)
+        return { state: "broken" };
+      const line = hits.reduce((a, n) => Math.abs(n - storedLine) < Math.abs(a - storedLine) ? n : a);
+      return { state: "stale", line };
+    }
+    module2.exports = { LINE_RE: LINE_RE2, hashLine: hashLine2, parseBinding: parseBinding2, formatBinding: formatBinding2, bindStateFrom: bindStateFrom2 };
   }
 });
 
@@ -933,19 +1037,20 @@ var require_i18n = __commonJS({
 var require_embed = __commonJS({
   "src/embed.js"(exports2, module2) {
     "use strict";
-    var { MarkdownRenderChild, Menu } = require("obsidian");
+    var { MarkdownRenderChild, Menu: Menu2, Notice: Notice2 } = require("obsidian");
     var nodePath2 = require("path");
     var { readLines, renderCode } = require_render();
+    var { parseBinding: parseBinding2 } = require_binding();
     var { t: t2 } = require_i18n();
     var EMBED_LANG = "code-link";
     var MAX_EMBED_LINES = 400;
-    function parseSpec(source) {
-      const spec = { target: "", context: "", lines: "", title: "" };
+    function parseSpec2(source) {
+      const spec = { target: "", context: "", lines: "", title: "", bind: "" };
       for (const raw of source.split("\n")) {
         const line = raw.trim();
         if (!line)
           continue;
-        const m = /^(context|lines|title)\s*:\s*(.*)$/i.exec(line);
+        const m = /^(context|lines|title|bind)\s*:\s*(.*)$/i.exec(line);
         if (m)
           spec[m[1].toLowerCase()] = m[2].trim();
         else if (!spec.target)
@@ -966,7 +1071,7 @@ var require_embed = __commonJS({
       const b = m[2] ? parseInt(m[2], 10) : a;
       return { from: Math.min(a, b), to: Math.max(a, b) };
     }
-    function splitPathRange(t3) {
+    function splitPathRange2(t3) {
       const m = /^(.+?):(\d+)(?:-(\d+))?$/.exec(t3);
       if (!m)
         return null;
@@ -974,13 +1079,19 @@ var require_embed = __commonJS({
       const to = m[3] ? parseInt(m[3], 10) : from;
       return { path: m[1], from: Math.min(from, to), to: Math.max(from, to), single: !m[3] };
     }
+    function setBindLine(body, title) {
+      const out = body.filter((l) => !/^\s*bind\s*:/i.test(l));
+      if (title)
+        out.push("bind: " + title);
+      return out;
+    }
     var looksLikePath = (s) => s.includes("/") || s.includes("\\") || /\.[a-z0-9]+$/i.test(s);
     function langForPath(plugin, relPath) {
       const ext = nodePath2.extname(relPath).toLowerCase();
       const lang = plugin.languages.find((l) => l.extensions.includes(ext));
       return lang ? lang.id : "";
     }
-    function resolvePath(plugin, relPath) {
+    function resolvePath2(plugin, relPath) {
       const norm = relPath.split("\\").join("/").replace(/^\.?\//, "");
       const hit = plugin.lookup(norm)[0];
       return hit ? hit.path : norm;
@@ -1002,7 +1113,7 @@ var require_embed = __commonJS({
       };
     }
     function fromPath(plugin, spec, relPath, from, to, targetLine) {
-      relPath = resolvePath(plugin, relPath);
+      relPath = resolvePath2(plugin, relPath);
       const ctx = intOr(spec.context, 0);
       const lr = splitRange(spec.lines);
       if (lr) {
@@ -1018,13 +1129,19 @@ var require_embed = __commonJS({
       to = to + ctx;
       return build(plugin, relPath, langForPath(plugin, relPath), from, to, targetLine, null);
     }
+    function withDrift(plugin, spec, res, pinnedLine) {
+      const b = parseBinding2(spec.bind);
+      if (b && res.relPath && !spec.lines)
+        res.drift = plugin.bindState(res.relPath, b, pinnedLine);
+      return res;
+    }
     function resolve(plugin, spec) {
       const target = spec.target;
       if (!target)
         return { error: t2("embed.empty") };
-      const pr = splitPathRange(target);
+      const pr = splitPathRange2(target);
       if (pr)
-        return fromPath(plugin, spec, pr.path, pr.from, pr.to, pr.single ? pr.from : null);
+        return withDrift(plugin, spec, fromPath(plugin, spec, pr.path, pr.from, pr.to, pr.single ? pr.from : null), pr.from);
       if (looksLikePath(target))
         return fromPath(plugin, spec, target, null, null, null);
       const f = plugin.parseQuery(target);
@@ -1042,10 +1159,11 @@ var require_embed = __commonJS({
       return build(plugin, e.path, e.lang, from, to, lr ? null : e.line, e.name);
     }
     var CodeEmbed = class extends MarkdownRenderChild {
-      constructor(containerEl, plugin, spec) {
+      constructor(containerEl, plugin, spec, ctx) {
         super(containerEl);
         this.plugin = plugin;
         this.spec = spec;
+        this.ctx = ctx;
         this.renderId = 0;
       }
       onload() {
@@ -1071,11 +1189,37 @@ var require_embed = __commonJS({
           return;
         evt.preventDefault();
         evt.stopPropagation();
-        const menu = new Menu();
+        const menu = new Menu2();
         if (res.entry)
           menu.addItem((i) => i.setTitle(t2("embed.menu.open")).setIcon("go-to-file").onClick(() => this.open()));
         menu.addItem((i) => i.setTitle(t2("embed.menu.refresh")).setIcon("refresh-cw").onClick(() => this.render(true)));
+        const p = this.plugin;
+        const site = p.embedSite(this.spec);
+        p.addPinItems(menu, (a) => p.pinOption(site, this.spec.bind, a), (a) => this.pin(a));
+        if (parseBinding2(this.spec.bind)) {
+          menu.addItem((i) => i.setTitle(t2("menu.unpin")).setIcon("pin-off").onClick(() => this.setBind("")));
+        }
         menu.showAtMouseEvent(evt);
+      }
+      pin(anchor) {
+        const o = this.plugin.pinOption(this.plugin.embedSite(this.spec), this.spec.bind, anchor);
+        if (!o) {
+          new Notice2(t2("notice.cantBind"));
+          return;
+        }
+        this.setBind(o.title);
+      }
+      // Rewrite this block's bind: line in the note itself. getSectionInfo gives the fence's
+      // line range, which is the only way back from a rendered block to its source.
+      async setBind(title) {
+        const info = this.ctx.getSectionInfo && this.ctx.getSectionInfo(this.containerEl);
+        if (!info) {
+          new Notice2(t2("notice.cantBind"));
+          return;
+        }
+        const body = info.text.split("\n").slice(info.lineStart + 1, info.lineEnd);
+        await this.plugin.writeEmbedBody(this.ctx.sourcePath, info, setBindLine(body, title));
+        new Notice2(title ? t2("notice.bound", { line: this.res.from }) : t2("notice.unbound"));
       }
       notice(cls, text) {
         this.containerEl.empty();
@@ -1089,7 +1233,8 @@ var require_embed = __commonJS({
         this.res = res;
         const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
         const mtime = cached ? cached.mtimeMs : null;
-        const sig = res.error ? "err:" + res.error : res.absPath + "|" + res.from + "|" + res.to + "|" + res.targetLine + "|" + mtime;
+        const drift = res.drift ? res.drift.state + (res.drift.line || "") : "";
+        const sig = res.error ? "err:" + res.error : res.absPath + "|" + res.from + "|" + res.to + "|" + res.targetLine + "|" + mtime + "|" + drift;
         if (!force && sig === this.lastSig && (res.error || mtime != null))
           return;
         this.lastSig = sig;
@@ -1111,6 +1256,8 @@ var require_embed = __commonJS({
         const header = el.createDiv({ cls: "code-linker-embed-header mod-clickable" });
         header.createSpan({ text: this.spec.title || res.relPath + ":" + (start === end ? start : start + "-" + end) });
         header.addEventListener("click", () => this.open());
+        if (res.drift)
+          header.classList.add("code-linker-embed-" + res.drift.state);
         const body = el.createDiv({ cls: "code-linker-embed-body" });
         if (res.targetLine != null) {
           const idx = res.targetLine - start;
@@ -1120,16 +1267,22 @@ var require_embed = __commonJS({
           }
         }
         await renderCode(body, snippet.lines.join("\n"), res.prismId);
+        if (res.drift) {
+          el.createDiv({
+            cls: "code-linker-embed-note code-linker-embed-" + res.drift.state,
+            text: res.drift.state === "stale" ? t2("embed.stale", { line: res.drift.line }) : t2("embed.broken")
+          });
+        }
         if (res.truncated)
           el.createDiv({ cls: "code-linker-embed-note", text: t2("embed.truncated", { max: MAX_EMBED_LINES }) });
       }
     };
     function registerEmbed2(plugin) {
       plugin.registerMarkdownCodeBlockProcessor(EMBED_LANG, (source, el, ctx) => {
-        ctx.addChild(new CodeEmbed(el, plugin, parseSpec(source)));
+        ctx.addChild(new CodeEmbed(el, plugin, parseSpec2(source), ctx));
       });
     }
-    module2.exports = { registerEmbed: registerEmbed2 };
+    module2.exports = { registerEmbed: registerEmbed2, parseSpec: parseSpec2, splitPathRange: splitPathRange2, resolvePath: resolvePath2 };
   }
 });
 
@@ -1141,32 +1294,27 @@ var require_actualize = __commonJS({
     var { ViewPlugin, Decoration } = require("@codemirror/view");
     var { RangeSetBuilder, StateEffect } = require("@codemirror/state");
     var { syntaxTree } = require("@codemirror/language");
-    var { linkRegex: linkRegex2, isFenceLine, inInlineCode } = require_markdown();
+    var { linkRegex: linkRegex2, splitTarget: splitTarget2, withTitle: withTitle2, rewriteLinks, rewriteFences } = require_markdown();
+    var { LINE_RE: LINE_RE2, parseBinding: parseBinding2, formatBinding: formatBinding2 } = require_binding();
     var { t: t2 } = require_i18n();
-    var LINE_RE = /:(\d+)(?=\D*$)/;
     var SKIP_NODE = /code|comment|frontmatter/i;
-    function updateLinksInText(plugin, text) {
-      const lines = text.split("\n");
-      let fenced = false, count = 0;
-      for (let i = 0; i < lines.length; i++) {
-        if (isFenceLine(lines[i])) {
-          fenced = !fenced;
-          continue;
-        }
-        if (fenced)
-          continue;
-        lines[i] = lines[i].replace(linkRegex2(), (whole, name, target, offset) => {
-          if (inInlineCode(lines[i], offset))
-            return whole;
-          const fixed = plugin.actualizedTarget(name, target);
-          if (fixed == null)
-            return whole;
-          count++;
-          return "[" + name + "](" + fixed + ")";
-        });
-      }
-      return { text: lines.join("\n"), count };
-    }
+    var EMBED_LANG = "code-link";
+    var updateLinksInText = (plugin, text) => {
+      const links = rewriteLinks(text, (name, target) => {
+        const fixed = plugin.actualizedTarget(target);
+        return fixed == null ? null : "[" + name + "](" + fixed + ")";
+      });
+      const embeds = rewriteFences(links.text, EMBED_LANG, (body) => plugin.actualizedEmbed(body));
+      return { text: embeds.text, count: links.count + embeds.count };
+    };
+    var pinLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
+      const { url, title } = splitTarget2(target);
+      if (title)
+        return null;
+      const site = plugin.linkSite(target);
+      const decl = site && plugin.declAtSite(site);
+      return decl ? "[" + name + "](" + withTitle2(url, formatBinding2({ sym: decl.name })) + ")" : null;
+    });
     var refreshEffect = StateEffect.define();
     function refreshStaleLinks(app) {
       app.workspace.iterateAllLeaves((leaf) => {
@@ -1196,7 +1344,7 @@ var require_actualize = __commonJS({
                 if (SKIP_NODE.test(n.type.name))
                   inCodeNode = true;
               } });
-              const state = inCodeNode ? null : plugin.linkState(m[1], m[2]);
+              const state = inCodeNode ? null : plugin.linkState(m[2]);
               if (state)
                 builder.add(start, end, marks[state]);
             }
@@ -1218,94 +1366,77 @@ var require_actualize = __commonJS({
         { decorations: (v) => v.decorations }
       );
     }
+    function bindStateOf(plugin, target) {
+      const { url, title } = splitTarget2(target);
+      const m = url && LINE_RE2.exec(url);
+      const b = parseBinding2(title);
+      return m && b ? plugin.urlBindState(url, b, parseInt(m[1], 10)) : null;
+    }
     var methods = {
-      // A stored link resolved to its live entry, or null when it can't be safely
-      // actualized (no line, not a code link, or an ambiguous name in the file). Unlike
-      // entryUnderPointer it never uses the stored line to disambiguate — that would hide
-      // the very drift we're detecting.
-      resolveStoredLink(name, target) {
-        if (!name || !target)
-          return null;
-        const m = LINE_RE.exec(target);
-        if (!m)
-          return null;
-        const storedLine = parseInt(m[1], 10);
-        const { cand } = this.linkCandidates(name, target);
-        const decls = cand.filter((e) => e.kind !== "file");
-        let entry;
-        if (decls.length === 1)
-          entry = decls[0];
-        else if (!decls.length && cand.length === 1)
-          entry = cand[0];
-        else
-          return null;
-        return { entry, storedLine, currentLine: entry.line };
+      linkState(target) {
+        const r = bindStateOf(this, target);
+        return r ? r.state : null;
       },
-      isLinkStale(name, target) {
-        const r = this.resolveStoredLink(name, target);
-        return !!r && r.currentLine !== r.storedLine;
+      isLinkStale(target) {
+        return this.linkState(target) === "stale";
       },
-      // Freshness of a code link for the visual marks: 'stale' (line drifted, fixable),
-      // 'broken' (its file is still indexed but the symbol is gone — renamed or removed),
-      // or null (current, ambiguous, not a code link, or unrelated — nothing to mark).
-      linkState(name, target) {
-        if (!name || !target)
+      // The link target with its line corrected, or null when there's nothing to fix. Shared
+      // by the note/vault commands and the right-click fix.
+      actualizedTarget(target) {
+        const r = bindStateOf(this, target);
+        if (!r || r.state !== "stale")
           return null;
-        if (!LINE_RE.test(target))
-          return null;
-        const r = this.resolveStoredLink(name, target);
-        if (r)
-          return r.currentLine === r.storedLine ? null : "stale";
-        const { dec, cand } = this.linkCandidates(name, target);
-        if (cand.length)
-          return null;
-        return this.targetIndexedFile(dec) ? "broken" : null;
+        const { url, title } = splitTarget2(target);
+        return withTitle2(url.replace(LINE_RE2, ":" + r.line), title);
       },
-      // The link target with its line corrected to the current declaration, or null when
-      // there's nothing to fix. Shared by the vault/note commands and the right-click fix.
-      actualizedTarget(name, target) {
-        const r = this.resolveStoredLink(name, target);
-        if (!r || r.currentLine === r.storedLine)
-          return null;
-        return target.replace(LINE_RE, ":" + r.currentLine);
-      },
-      // Works in both edit and reading view: an open editor keeps cursor/undo, otherwise
-      // the active file is rewritten through the vault.
-      async updateLinksInActiveNote() {
+      // An open editor keeps cursor and undo; in reading view there's none, so the active
+      // file is rewritten through the vault.
+      async rewriteActiveNote(transform, noticeKey) {
         const view = this.app.workspace.getActiveViewOfType(MarkdownView2);
         const editor = view && view.editor;
         if (editor) {
-          const { text: text2, count: count2 } = updateLinksInText(this, editor.getValue());
+          const { text: text2, count: count2 } = transform(this, editor.getValue());
           if (count2) {
             const cur = editor.getCursor();
             editor.setValue(text2);
             editor.setCursor(cur);
           }
-          new Notice2(t2("notice.linksUpdated", { n: count2 }));
+          new Notice2(t2(noticeKey, { n: count2 }));
           return;
         }
         const file = this.app.workspace.getActiveFile();
         if (!file) {
-          new Notice2(t2("notice.linksUpdated", { n: 0 }));
+          new Notice2(t2(noticeKey, { n: 0 }));
           return;
         }
-        const { text, count } = updateLinksInText(this, await this.app.vault.read(file));
+        const { text, count } = transform(this, await this.app.vault.read(file));
         if (count)
           await this.app.vault.modify(file, text);
-        new Notice2(t2("notice.linksUpdated", { n: count }));
+        new Notice2(t2(noticeKey, { n: count }));
       },
-      async updateLinksInVault() {
+      async rewriteVault(transform, noticeKey) {
         let files = 0, total = 0;
         for (const f of this.app.vault.getMarkdownFiles()) {
-          const src = await this.app.vault.read(f);
-          const { text, count } = updateLinksInText(this, src);
+          const { text, count } = transform(this, await this.app.vault.read(f));
           if (count) {
             await this.app.vault.modify(f, text);
             files++;
             total += count;
           }
         }
-        new Notice2(t2("notice.linksUpdatedVault", { n: total, files }));
+        new Notice2(t2(noticeKey, { n: total, files }));
+      },
+      updateLinksInActiveNote() {
+        return this.rewriteActiveNote(updateLinksInText, "notice.linksUpdated");
+      },
+      updateLinksInVault() {
+        return this.rewriteVault(updateLinksInText, "notice.linksUpdatedVault");
+      },
+      pinLinksInActiveNote() {
+        return this.rewriteActiveNote(pinLinksInText, "notice.linksPinned");
+      },
+      pinLinksInVault() {
+        return this.rewriteVault(pinLinksInText, "notice.linksPinnedVault");
       }
     };
     module2.exports = { methods, staleLinksExtension, refreshStaleLinks };
@@ -1316,7 +1447,7 @@ var require_actualize = __commonJS({
 var require_modal = __commonJS({
   "src/modal.js"(exports2, module2) {
     "use strict";
-    var { FuzzySuggestModal } = require("obsidian");
+    var { FuzzySuggestModal, Modal, Setting } = require("obsidian");
     var { t: t2 } = require_i18n();
     var CodeLinkModal2 = class extends FuzzySuggestModal {
       constructor(app, plugin, opts) {
@@ -1364,7 +1495,41 @@ var require_modal = __commonJS({
         this.onChoose(p);
       }
     };
-    module2.exports = { CodeLinkModal: CodeLinkModal2, PresetPickerModal: PresetPickerModal2 };
+    var LinePromptModal2 = class extends Modal {
+      constructor(app, line, onSubmit) {
+        super(app);
+        this.line = String(line);
+        this.onSubmit = onSubmit;
+      }
+      onOpen() {
+        this.titleEl.setText(t2("modal.linePrompt"));
+        new Setting(this.contentEl).addText((c) => {
+          c.setValue(this.line).onChange((v) => {
+            this.line = v;
+          });
+          c.inputEl.type = "number";
+          c.inputEl.min = "1";
+          c.inputEl.focus();
+          c.inputEl.select();
+          c.inputEl.addEventListener("keydown", (e) => {
+            if (e.key === "Enter")
+              this.submit();
+          });
+        });
+        new Setting(this.contentEl).addButton((b) => b.setButtonText(t2("modal.lineSubmit")).setCta().onClick(() => this.submit()));
+      }
+      submit() {
+        const n = parseInt(this.line, 10);
+        if (!(n >= 1))
+          return;
+        this.close();
+        this.onSubmit(n);
+      }
+      onClose() {
+        this.contentEl.empty();
+      }
+    };
+    module2.exports = { CodeLinkModal: CodeLinkModal2, PresetPickerModal: PresetPickerModal2, LinePromptModal: LinePromptModal2 };
   }
 });
 
@@ -1943,13 +2108,24 @@ var require_en = __commonJS({
       "cmd.copyLink": "Copy code link",
       "cmd.convertSelection": "Convert selection to code link",
       "cmd.openSelection": "Find and open code",
+      "cmd.insertLineLink": "Insert code link to a line",
       "cmd.insertEmbed": "Insert code embed",
+      "cmd.pin.sym": "Pin code link to its symbol",
+      "cmd.pin.kind": "Pin code link to its kind",
+      "cmd.pin.line": "Pin code link to its exact line",
+      "cmd.pinLinksNote": "Pin unpinned code links in this note",
+      "cmd.pinLinksVault": "Pin unpinned code links in the whole vault",
       "cmd.updateLinksNote": "Update code links in this note",
       "cmd.updateLinksVault": "Update code links in the whole vault",
       // Editor context menu
       "menu.convert": "Find and convert to link",
       "menu.copyLink": "Copy code link",
       "menu.fixLink": "Update this code link",
+      "menu.pin": "Pin this code link",
+      "menu.pin.sym": "Pin to symbol \u201C{value}\u201D",
+      "menu.pin.kind": "Pin to kind \u201C{value}\u201D",
+      "menu.pin.line": "Pin to this exact line ({value})",
+      "menu.unpin": "Unpin this code link",
       // Notices
       "notice.noCodeRoot": "Code Linker: could not determine code root",
       "notice.noLanguages": "Code Linker: no languages enabled",
@@ -1957,11 +2133,17 @@ var require_en = __commonJS({
       "notice.indexed": "Code Linker: {entries} indexed",
       "notice.missingFolders": "Code Linker: scan folder not found \u2014 {folders}",
       "notice.copied": "Code Linker: link copied",
+      "notice.bound": "Code Linker: link pinned to line {line}",
+      "notice.unbound": "Code Linker: link unpinned \u2014 it is no longer tracked",
+      "notice.cantBind": "Code Linker: can't pin \u2014 the link doesn't point at a line of an indexed file",
       "notice.noGit": "Code Linker: no git repository (with a remote) found for this file",
       "notice.editorSet": "Code Linker: links now open in {name}",
       "notice.noSelection": "Code Linker: select a name or path first",
       "notice.noMatch": "Code Linker: no code entry matches \u201C{query}\u201D",
       "notice.watchUnsupported": "Code Linker: auto-refresh is unavailable on this platform \u2014 rebuild manually",
+      "notice.linksPinned": "Code Linker: {n} link(s) pinned",
+      "notice.linksPinnedVault": "Code Linker: {n} link(s) pinned across {files} note(s)",
+      "notice.noDeclHere": "Code Linker: nothing is declared on that line \u2014 pin it to the line instead",
       "notice.linksUpdated": "Code Linker: {n} link(s) updated",
       "notice.linksUpdatedVault": "Code Linker: {n} link(s) updated across {files} note(s)",
       "notice.langFileNoPath": "Code Linker: set a languages file path first",
@@ -1970,9 +2152,12 @@ var require_en = __commonJS({
       "notice.langFileError": "Code Linker: could not create the file \u2014 {error}",
       // Inline embeds
       "embed.empty": "Code Linker: empty embed \u2014 give a symbol name or a path:line",
+      "embed.fmt.file": "Whole file",
       "embed.fmt.symbol": "Symbol \u2014 tracks the declaration as code moves",
       "embed.fmt.line": "Declaration line ({line})",
       "embed.fmt.range": "Line range ({from}-{to}, edit to taste)",
+      "embed.stale": "Code Linker: the pinned code moved to line {line} \u2014 run \u201CUpdate code links in this note\u201D",
+      "embed.broken": "Code Linker: the pinned code is gone \u2014 renamed, removed, or the line was rewritten",
       "embed.menu.open": "Open code file",
       "embed.menu.refresh": "Refresh embed",
       "embed.notFound": "Code Linker: no code entry matches \u201C{query}\u201D",
@@ -1985,6 +2170,8 @@ var require_en = __commonJS({
       "status.editorTooltip": "Code Linker: click to switch the editor links open in",
       // Command-palette modal
       "modal.searchPlaceholder": "Search code files and types\u2026",
+      "modal.linePrompt": "Which line?",
+      "modal.lineSubmit": "Insert link",
       "modal.switchPlaceholder": "Choose the editor links open in\u2026",
       "modal.formatPlaceholder": "Choose an editor format for this link\u2026",
       "modal.productPlaceholder": "Choose a JetBrains IDE\u2026",
@@ -2096,13 +2283,24 @@ var require_ru = __commonJS({
       "cmd.copyLink": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
       "cmd.convertSelection": "\u041F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u0435 \u0432 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
       "cmd.openSelection": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434",
+      "cmd.insertLineLink": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0441\u0442\u0440\u043E\u043A\u0443 \u043A\u043E\u0434\u0430",
       "cmd.insertEmbed": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C embed \u043A\u043E\u0434\u0430",
+      "cmd.pin.sym": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u0437\u0430 \u0435\u0451 \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u043C",
+      "cmd.pin.kind": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u0437\u0430 \u0435\u0451 \u0432\u0438\u0434\u043E\u043C",
+      "cmd.pin.line": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u0437\u0430 \u0435\u0451 \u0441\u0442\u0440\u043E\u043A\u043E\u0439",
+      "cmd.pinLinksNote": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u043D\u0435\u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438 \u0432 \u044D\u0442\u043E\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0435",
+      "cmd.pinLinksVault": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u043D\u0435\u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438 \u0432\u043E \u0432\u0441\u0451\u043C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
       "cmd.updateLinksNote": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u043A\u043E\u0434 \u0432 \u044D\u0442\u043E\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0435",
       "cmd.updateLinksVault": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u043A\u043E\u0434 \u0432\u043E \u0432\u0441\u0451\u043C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
       // Editor context menu
       "menu.convert": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
       "menu.copyLink": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
       "menu.fixLink": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
+      "menu.pin": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443",
+      "menu.pin.sym": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u0437\u0430 \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u043C \xAB{value}\xBB",
+      "menu.pin.kind": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u0437\u0430 \u0432\u0438\u0434\u043E\u043C \xAB{value}\xBB",
+      "menu.pin.line": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u0437\u0430 \u044D\u0442\u043E\u0439 \u0441\u0442\u0440\u043E\u043A\u043E\u0439 ({value})",
+      "menu.unpin": "\u041E\u0442\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443",
       // Notices
       "notice.noCodeRoot": "Code Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u044C \u043A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430",
       "notice.noLanguages": "Code Linker: \u043D\u0435 \u0432\u043A\u043B\u044E\u0447\u0451\u043D \u043D\u0438 \u043E\u0434\u0438\u043D \u044F\u0437\u044B\u043A",
@@ -2110,11 +2308,17 @@ var require_ru = __commonJS({
       "notice.indexed": "Code Linker: \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
       "notice.missingFolders": "Code Linker: \u043F\u0430\u043F\u043A\u0430 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u2014 {folders}",
       "notice.copied": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u0430",
+      "notice.bound": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0430 \u0437\u0430 \u0441\u0442\u0440\u043E\u043A\u043E\u0439 {line}",
+      "notice.unbound": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u043E\u0442\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0430 \u2014 \u0431\u043E\u043B\u044C\u0448\u0435 \u043D\u0435 \u043E\u0442\u0441\u043B\u0435\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044F",
+      "notice.cantBind": "Code Linker: \u043D\u0435 \u0437\u0430 \u0447\u0442\u043E \u0437\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u2014 \u0441\u0441\u044B\u043B\u043A\u0430 \u043D\u0435 \u0432\u0435\u0434\u0451\u0442 \u043D\u0430 \u0441\u0442\u0440\u043E\u043A\u0443 \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430",
       "notice.noGit": "Code Linker: \u0434\u043B\u044F \u044D\u0442\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D git-\u0440\u0435\u043F\u043E\u0437\u0438\u0442\u043E\u0440\u0438\u0439 \u0441 remote",
       "notice.editorSet": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0438 \u0442\u0435\u043F\u0435\u0440\u044C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432 {name}",
       "notice.noSelection": "Code Linker: \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u044B\u0434\u0435\u043B\u0438\u0442\u0435 \u0438\u043C\u044F \u0438\u043B\u0438 \u043F\u0443\u0442\u044C",
       "notice.noMatch": "Code Linker: \u043D\u0435\u0442 \u0437\u0430\u043F\u0438\u0441\u0438 \u043A\u043E\u0434\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
       "notice.watchUnsupported": "Code Linker: \u0430\u0432\u0442\u043E\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 \u2014 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
+      "notice.linksPinned": "Code Linker: \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n}",
+      "notice.linksPinnedVault": "Code Linker: \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}",
+      "notice.noDeclHere": "Code Linker: \u043D\u0430 \u044D\u0442\u043E\u0439 \u0441\u0442\u0440\u043E\u043A\u0435 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u043E \u2014 \u0437\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u0435 \u0437\u0430 \u0441\u0442\u0440\u043E\u043A\u043E\u0439",
       "notice.linksUpdated": "Code Linker: \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n}",
       "notice.linksUpdatedVault": "Code Linker: \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}",
       "notice.langFileNoPath": "Code Linker: \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0443\u043A\u0430\u0436\u0438\u0442\u0435 \u043F\u0443\u0442\u044C \u043A \u0444\u0430\u0439\u043B\u0443 \u044F\u0437\u044B\u043A\u043E\u0432",
@@ -2123,9 +2327,12 @@ var require_ru = __commonJS({
       "notice.langFileError": "Code Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0444\u0430\u0439\u043B \u2014 {error}",
       // Inline embeds
       "embed.empty": "Code Linker: \u043F\u0443\u0441\u0442\u043E\u0439 embed \u2014 \u0443\u043A\u0430\u0436\u0438\u0442\u0435 \u0438\u043C\u044F \u0441\u0438\u043C\u0432\u043E\u043B\u0430 \u0438\u043B\u0438 \u043F\u0443\u0442\u044C:\u0441\u0442\u0440\u043E\u043A\u0443",
+      "embed.fmt.file": "\u0424\u0430\u0439\u043B \u0446\u0435\u043B\u0438\u043A\u043E\u043C",
       "embed.fmt.symbol": "\u0421\u0438\u043C\u0432\u043E\u043B \u2014 \u0441\u043B\u0435\u0434\u0443\u0435\u0442 \u0437\u0430 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u0435\u043C \u043F\u0440\u0438 \u0434\u0432\u0438\u0436\u0435\u043D\u0438\u0438 \u043A\u043E\u0434\u0430",
       "embed.fmt.line": "\u0421\u0442\u0440\u043E\u043A\u0430 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u044F ({line})",
       "embed.fmt.range": "\u0414\u0438\u0430\u043F\u0430\u0437\u043E\u043D \u0441\u0442\u0440\u043E\u043A ({from}-{to}, \u043F\u043E\u043F\u0440\u0430\u0432\u044C\u0442\u0435 \u043F\u043E \u0432\u043A\u0443\u0441\u0443)",
+      "embed.stale": "Code Linker: \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u044B\u0439 \u043A\u043E\u0434 \u0443\u0435\u0445\u0430\u043B \u043D\u0430 \u0441\u0442\u0440\u043E\u043A\u0443 {line} \u2014 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \xAB\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u0432 \u044D\u0442\u043E\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0435\xBB",
+      "embed.broken": "Code Linker: \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u044B\u0439 \u043A\u043E\u0434 \u043F\u0440\u043E\u043F\u0430\u043B \u2014 \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D, \u0443\u0434\u0430\u043B\u0451\u043D \u0438\u043B\u0438 \u0441\u0442\u0440\u043E\u043A\u0430 \u043F\u0435\u0440\u0435\u043F\u0438\u0441\u0430\u043D\u0430",
       "embed.menu.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0444\u0430\u0439\u043B \u043A\u043E\u0434\u0430",
       "embed.menu.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C embed",
       "embed.notFound": "Code Linker: \u043D\u0435\u0442 \u0437\u0430\u043F\u0438\u0441\u0438 \u043A\u043E\u0434\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
@@ -2138,6 +2345,8 @@ var require_ru = __commonJS({
       "status.editorTooltip": "Code Linker: \u043A\u043B\u0438\u043A \u2014 \u0441\u043C\u0435\u043D\u0438\u0442\u044C \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440, \u0432 \u043A\u043E\u0442\u043E\u0440\u043E\u043C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0441\u0441\u044B\u043B\u043A\u0438",
       // Command-palette modal
       "modal.searchPlaceholder": "\u041F\u043E\u0438\u0441\u043A \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u0442\u0438\u043F\u043E\u0432 \u043A\u043E\u0434\u0430\u2026",
+      "modal.linePrompt": "\u041A\u0430\u043A\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430?",
+      "modal.lineSubmit": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443",
       "modal.switchPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440, \u0432 \u043A\u043E\u0442\u043E\u0440\u043E\u043C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0441\u0441\u044B\u043B\u043A\u0438\u2026",
       "modal.formatPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430 \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u0441\u0441\u044B\u043B\u043A\u0438\u2026",
       "modal.productPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 IDE JetBrains\u2026",
@@ -2236,7 +2445,7 @@ var require_ru = __commonJS({
 });
 
 // src/main.js
-var { Plugin, Notice, normalizePath, MarkdownView } = require("obsidian");
+var { Plugin, Notice, normalizePath, MarkdownView, Menu } = require("obsidian");
 var { EditorView } = require("@codemirror/view");
 var { Prec } = require("@codemirror/state");
 var fs = require("fs");
@@ -2244,18 +2453,20 @@ var fsp = fs.promises;
 var readline = require("readline");
 var nodePath = require("path");
 var { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, parseSkip, underSkip, pathInTarget } = require_constants();
-var { splitLines, inTableCell, inCode, inLink, linkRegex } = require_markdown();
+var { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require_markdown();
+var { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom } = require_binding();
 var { resolveGit, resolveGitDir } = require_git();
 var GIT_PLACEHOLDER = /{(?:gitRemote|gitSha|gitBranch)}/;
+var LINE_TOKEN = /[^\w{}]*[A-Za-z]*\{line\}/;
 var PRODUCT_PLACEHOLDER = /{(?:jetbrainsProduct|product)}/;
 var MAX_PARSE_LINE_LENGTH = 2e3;
 var { BUILTIN_LANGUAGES } = require_builtin_languages();
 var { CodeIndexSuggest } = require_suggest();
 var filter = require_filter();
 var { HoverPreview } = require_hover();
-var { registerEmbed } = require_embed();
+var { registerEmbed, parseSpec, splitPathRange, resolvePath } = require_embed();
 var actualize = require_actualize();
-var { CodeLinkModal, PresetPickerModal } = require_modal();
+var { CodeLinkModal, PresetPickerModal, LinePromptModal } = require_modal();
 var { CodeLinkerSettingTab } = require_settings_tab();
 var { initI18n, t, plural } = require_i18n();
 var api = require_api();
@@ -2269,6 +2480,7 @@ var CodeLinkerPlugin = class extends Plugin {
     this.customRaw = "";
     this.watchers = [];
     this.fileCache = /* @__PURE__ */ new Map();
+    this.lineMaps = /* @__PURE__ */ new Map();
     this.cacheSignature = "";
     this._indexListeners = /* @__PURE__ */ new Set();
     await this.loadLanguagesFile();
@@ -2322,6 +2534,20 @@ var CodeLinkerPlugin = class extends Plugin {
     this.addCommand({ id: "copy-code-link", name: t("cmd.copyLink"), callback: () => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.copyLink(e, tpl))) });
     this.addCommand({ id: "convert-selection-to-link", name: t("cmd.convertSelection"), editorCallback: (editor) => this.convertSelection(editor) });
     this.addCommand({ id: "open-selected-code", name: t("cmd.openSelection"), editorCallback: (editor) => this.openSelection(editor) });
+    this.addCommand({ id: "insert-code-link-line", name: t("cmd.insertLineLink"), editorCallback: (editor) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLineLink(editor, tpl)) });
+    this.addLinkCommand("copy-code-link-at-cursor", t("menu.copyLink"), () => true, (editor, link) => this.copyLinkAtCursor(link));
+    this.addLinkCommand("fix-code-link", t("menu.fixLink"), (link) => this.isLinkStale(link.target), (editor, link) => this.fixLinkAtCursor(editor, link));
+    for (const anchor of ["sym", "kind", "line"]) {
+      this.addLinkCommand(
+        "pin-code-link-" + anchor,
+        t("cmd.pin." + anchor),
+        (link) => !!this.linkPinOption(link, anchor),
+        (editor, link) => this.pinLink(editor, link, anchor)
+      );
+    }
+    this.addLinkCommand("unpin-code-link", t("menu.unpin"), (link) => this.linkAtCursorBound(link), (editor, link) => this.unbindLink(editor, link));
+    this.addCommand({ id: "pin-links-note", name: t("cmd.pinLinksNote"), callback: () => this.pinLinksInActiveNote() });
+    this.addCommand({ id: "pin-links-vault", name: t("cmd.pinLinksVault"), callback: () => this.pinLinksInVault() });
     this.addCommand({ id: "insert-code-embed", name: t("cmd.insertEmbed"), editorCallback: (editor) => this.pickEntry((e) => this.insertEmbed(editor, e)) });
     this.addCommand({ id: "update-links-note", name: t("cmd.updateLinksNote"), callback: () => this.updateLinksInActiveNote() });
     this.addCommand({ id: "update-links-vault", name: t("cmd.updateLinksVault"), callback: () => this.updateLinksInVault() });
@@ -2336,10 +2562,14 @@ var CodeLinkerPlugin = class extends Plugin {
           menu.addItem((item) => item.setTitle(t("cmd.openSelection")).setIcon("file-search").onClick(() => this.openSelection(editor)));
         }
         const link = this.codeLinkAtCursor(editor);
-        if (link && this.isCodeLink(link.name, link.target)) {
+        if (link && this.isCodeLink(link.target)) {
           menu.addItem((item) => item.setTitle(t("menu.copyLink")).setIcon("copy").onClick(() => this.copyLinkAtCursor(link)));
-          if (this.isLinkStale(link.name, link.target)) {
+          if (this.isLinkStale(link.target)) {
             menu.addItem((item) => item.setTitle(t("menu.fixLink")).setIcon("wrench").onClick(() => this.fixLinkAtCursor(editor, link)));
+          }
+          this.addPinItems(menu, (a) => this.linkPinOption(link, a), (a) => this.pinLink(editor, link, a));
+          if (this.linkAtCursorBound(link)) {
+            menu.addItem((item) => item.setTitle(t("menu.unpin")).setIcon("pin-off").onClick(() => this.unbindLink(editor, link)));
           }
         }
       })
@@ -2395,12 +2625,19 @@ var CodeLinkerPlugin = class extends Plugin {
     }
     this.markStaleAnchors(el);
   }
+  // A rendered anchor back in raw [text](url "title") form: reading view parses the title
+  // into its own attribute, while Live Preview only ever sees the raw line.
+  anchorTarget(a) {
+    const href = a.getAttribute("href") || a.getAttribute("data-href") || "";
+    const title = a.getAttribute("title") || "";
+    return withTitle(href, title);
+  }
   // Toggle the drifted/broken-link underline on every rendered anchor in `el`. toggle (not
   // add) so re-running after an index rebuild also clears links that are now current.
   markStaleAnchors(el) {
     const links = el.querySelectorAll ? el.querySelectorAll("a") : [];
     for (const a of links) {
-      const state = this.settings.markStaleLinks ? this.linkState(a.textContent, a.getAttribute("href") || "") : null;
+      const state = this.settings.markStaleLinks ? this.linkState(this.anchorTarget(a)) : null;
       a.classList.toggle("code-linker-stale", state === "stale");
       a.classList.toggle("code-linker-broken", state === "broken");
     }
@@ -2470,7 +2707,7 @@ var CodeLinkerPlugin = class extends Plugin {
       return null;
     const a = el.closest("a");
     if (a && !(a.classList && a.classList.contains("internal-link"))) {
-      const entry = this.entryUnderPointer(a.textContent, a.getAttribute("href") || a.getAttribute("data-href") || "");
+      const entry = this.entryUnderPointer(this.anchorTarget(a));
       if (entry)
         return { entry, requireMod: false };
     }
@@ -2478,7 +2715,7 @@ var CodeLinkerPlugin = class extends Plugin {
       const view = typeof EditorView.findFromDOM === "function" ? EditorView.findFromDOM(el) : this.activeCm();
       const ref = view && this.codeRefAt(view, x, y);
       if (ref) {
-        const entry = this.entryUnderPointer(ref.name, ref.target);
+        const entry = this.entryUnderPointer(ref.target);
         if (entry)
           return { entry, requireMod: true };
       }
@@ -2497,14 +2734,19 @@ var CodeLinkerPlugin = class extends Plugin {
   // which every preset embeds via {path}/{abs}; that rejects unrelated links even
   // when their text matches a symbol name. Ties are broken by the line in the
   // target, preferring a declaration over the bare file entry.
-  entryUnderPointer(name, target) {
-    if (!name || !target)
+  entryUnderPointer(target) {
+    const { url } = splitTarget(target);
+    if (!url)
       return null;
-    const { dec, cand } = this.linkCandidates(name, target);
-    if (cand.length <= 1)
-      return cand[0] || null;
-    const onLine = cand.find((e) => new RegExp("[:=]" + e.line + "(?:\\D|$)").test(dec));
-    return onLine || cand.find((e) => e.kind !== "file") || cand[0];
+    const rel = this.targetIndexedFile(this.decodeTarget(url));
+    const entries = rel ? (this.fileCache.get(rel) || { entries: [] }).entries : [];
+    if (!entries.length)
+      return null;
+    const m = LINE_RE.exec(url);
+    if (!m)
+      return entries[0];
+    const line = parseInt(m[1], 10);
+    return entries.find((e) => e.line === line && e.kind !== "file") || { name: entries[0].name, path: rel, line, kind: "line", lang: entries[0].lang };
   }
   // CM6 link handler for Live Preview. Suppresses Obsidian's open of the literal
   // {root} URL; opens the resolved one on click/auxclick. Returns true when handled.
@@ -2548,7 +2790,8 @@ var CodeLinkerPlugin = class extends Plugin {
     const ref = this.codeRefAt(view, evt.clientX, evt.clientY);
     if (!ref)
       return null;
-    return /\{root\}|%7Broot%7D/i.test(ref.target) ? this.fillRoot(ref.target) : null;
+    const { url } = splitTarget(ref.target);
+    return /\{root\}|%7Broot%7D/i.test(url) ? this.fillRoot(url) : null;
   }
   // Absolute base folder the scan paths are resolved against.
   codeRoot() {
@@ -2663,13 +2906,18 @@ var CodeLinkerPlugin = class extends Plugin {
   // whose display name matches and whose path appears in it — the shared first step of
   // resolving a link. Callers apply their own tie-break (hover uses the stored line,
   // actualization must not).
-  linkCandidates(name, target) {
-    let dec = this.fillRoot(target);
+  // A link url as a plain comparable path string: {root} filled in, percent-escapes
+  // undone, backslashes normalised.
+  decodeTarget(url) {
+    let dec = this.fillRoot(url);
     try {
       dec = decodeURIComponent(dec);
     } catch (e) {
     }
-    dec = dec.split("\\").join("/");
+    return dec.split("\\").join("/");
+  }
+  linkCandidates(name, target) {
+    const dec = this.decodeTarget(target);
     const named = this.entriesByName(name).filter((e) => e.name === name && pathInTarget(dec, e.path));
     const bestLen = named.reduce((mx, e) => Math.max(mx, e.path.length), 0);
     const cand = named.filter((e) => e.path.length === bestLen);
@@ -2685,6 +2933,73 @@ var CodeLinkerPlugin = class extends Plugin {
         best = rel;
     }
     return best;
+  }
+  // Line hashes for one file, as hash -> line numbers. Kept in memory only: it's derived
+  // from the file, and only files carrying a line binding are ever read, so the on-disk
+  // index cache stays as small as it is.
+  lineMap(rel) {
+    const abs = nodePath.join(this.codeRoot(), rel);
+    let stat;
+    try {
+      stat = fs.statSync(abs);
+    } catch (e) {
+      return null;
+    }
+    const hit = this.lineMaps.get(rel);
+    if (hit && hit.mtimeMs === stat.mtimeMs)
+      return hit.map;
+    let text;
+    try {
+      text = fs.readFileSync(abs, "utf8");
+    } catch (e) {
+      return null;
+    }
+    const map = /* @__PURE__ */ new Map();
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i].trim())
+        continue;
+      const h = hashLine(lines[i]);
+      const a = map.get(h);
+      if (a)
+        a.push(i + 1);
+      else
+        map.set(h, [i + 1]);
+    }
+    this.lineMaps.set(rel, { mtimeMs: stat.mtimeMs, map });
+    return map;
+  }
+  // The indexed entries of one file.
+  entriesIn(rel) {
+    return rel ? (this.fileCache.get(rel) || { entries: [] }).entries : [];
+  }
+  lineHitsIn(rel, hash) {
+    const map = rel && this.lineMap(rel);
+    return map && map.get(hash) || [];
+  }
+  // The lines of `rel` meeting every anchor of a binding — anchors are requirements, so
+  // they intersect.
+  bindingHitsIn(rel, b) {
+    const sets = [];
+    if (b.sym)
+      sets.push(this.entriesIn(rel).filter((e) => e.name === b.sym).map((e) => e.line));
+    if (b.kind)
+      sets.push(this.entriesIn(rel).filter((e) => e.kind === b.kind).map((e) => e.line));
+    if (b.hash)
+      sets.push(this.lineHitsIn(rel, b.hash));
+    if (!sets.length)
+      return [];
+    return [...new Set(sets.reduce((a, s) => a.filter((n) => s.includes(n))))];
+  }
+  // What a binding says about a spot in `rel`: null when it still sits on a match,
+  // { state: 'stale', line } with where it moved to, or { state: 'broken' } when nothing
+  // in the file meets it any more. One answer for links and embeds alike.
+  bindState(rel, b, storedLine) {
+    return bindStateFrom(this.bindingHitsIn(rel, b), storedLine);
+  }
+  // The same, for a link: its url names the file.
+  urlBindState(url, b, storedLine) {
+    return this.bindState(this.targetIndexedFile(this.decodeTarget(url)), b, storedLine);
   }
   // The single entry a bare symbol resolves to (a declaration preferred over the file
   // entry), or null when the name spans several files (ambiguous) or is unknown.
@@ -3017,9 +3332,11 @@ var CodeLinkerPlugin = class extends Plugin {
   // {root} stays in the link for portability (resolved on render/click); call fillRoot()
   // when opening the URI directly. `template` overrides the default preset.
   buildUri(e, template) {
-    const tpl = template || this.settings.uriTemplate;
+    let tpl = template || this.settings.uriTemplate;
     const absFs = this.entryPath(e);
     const absFwd = absFs.split(nodePath.sep).join("/");
+    if (e.kind === "file")
+      tpl = tpl.replace(LINE_TOKEN, "");
     const line = String(e.line || 1);
     const project = (e.path.split("/")[0] || "").trim();
     const jb = this.settings.jetbrainsProduct;
@@ -3038,7 +3355,9 @@ var CodeLinkerPlugin = class extends Plugin {
     new Notice(t("notice.noGit"));
     return true;
   }
-  // The markdown link to insert. Inside a table cell a literal pipe splits the row.
+  // The markdown link to insert: a plain markdown link, nothing more. Tracking is opt-in
+  // — pin the link when you want it, the same way an embed only tracks once you give it a
+  // bind: line. Inside a table cell a literal pipe splits the row.
   buildLink(e, inTable, template) {
     const link = `[${e.name}](${this.buildUri(e, template)})`;
     return inTable ? link.replace(/\|/g, "\\|") : link;
@@ -3057,9 +3376,10 @@ var CodeLinkerPlugin = class extends Plugin {
   // A range shows a window of code; add a `context: N` line by hand to pad the others.
   embedFormats(e) {
     const line = e.line || 1;
-    const unique = e.kind !== "file" && !!this.uniqueSymbolEntry(e.name);
+    if (e.kind === "file")
+      return [{ label: t("embed.fmt.file"), body: e.path }];
     const out = [];
-    if (unique)
+    if (this.uniqueSymbolEntry(e.name))
       out.push({ label: t("embed.fmt.symbol"), body: e.name });
     out.push({ label: t("embed.fmt.line", { line }), body: e.path + ":" + line });
     out.push({ label: t("embed.fmt.range", { from: line, to: line + 10 }), body: e.path + ":" + line + "-" + (line + 10) });
@@ -3269,7 +3589,7 @@ var CodeLinkerPlugin = class extends Plugin {
     return null;
   }
   fixLinkAtCursor(editor, link) {
-    const target = this.actualizedTarget(link.name, link.target);
+    const target = this.actualizedTarget(link.target);
     if (target == null) {
       new Notice(t("notice.linksUpdated", { n: 0 }));
       return;
@@ -3277,16 +3597,200 @@ var CodeLinkerPlugin = class extends Plugin {
     editor.replaceRange("[" + link.name + "](" + target + ")", { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
     new Notice(t("notice.linksUpdated", { n: 1 }));
   }
-  // Whether a markdown link is one of ours (points at indexed code) rather than a wiki
-  // or web link — true for current, drifted and broken code links alike, so the
-  // right-click copy/fix items only show on links this plugin owns.
-  isCodeLink(name, target) {
-    return !!this.entryUnderPointer(name, target) || !!this.linkState(name, target);
+  // Whether a markdown link is one of ours rather than a wiki or web link. It's the url
+  // that decides, not the text or the binding: a link whose text you rewrote and whose
+  // binding is gone is still ours, and it's exactly the one you'd want to pin.
+  isCodeLink(target) {
+    const { url } = splitTarget(target);
+    return !!url && !!this.targetIndexedFile(this.decodeTarget(url));
+  }
+  // A link's file and stored line as { rel, line, text }, or null when it doesn't point
+  // into an indexed file or the line is past its end. `text` is that line's contents —
+  // what a line binding hashes.
+  linkSite(target) {
+    const { url } = splitTarget(target);
+    const m = url && LINE_RE.exec(url);
+    if (!m)
+      return null;
+    const rel = this.targetIndexedFile(this.decodeTarget(url));
+    const line = parseInt(m[1], 10);
+    const text = rel && this.lineTextAt(rel, line);
+    return text == null ? null : { rel, line, text };
+  }
+  // One line's text straight from disk, or null when the file or the line isn't there.
+  lineTextAt(rel, line) {
+    let text;
+    try {
+      text = fs.readFileSync(nodePath.join(this.codeRoot(), rel), "utf8");
+    } catch (e) {
+      return null;
+    }
+    const lines = text.split("\n");
+    return line >= 1 && line <= lines.length ? lines[line - 1] : null;
+  }
+  // A ```code-link block's body with its target line brought up to date, or null when
+  // there's nothing to fix. Only the numbers move: the path is written the way the reader
+  // wrote it (a tail like "http-client.ts" resolves fine), and a range keeps its length.
+  actualizedEmbed(body) {
+    const spec = parseSpec(body.join("\n"));
+    const b = parseBinding(spec.bind);
+    if (!b || spec.lines)
+      return null;
+    const pr = splitPathRange(spec.target);
+    if (!pr)
+      return null;
+    const d = this.bindState(resolvePath(this, pr.path), b, pr.from);
+    if (!d || d.state !== "stale")
+      return null;
+    const moved = pr.path + ":" + d.line + (pr.single ? "" : "-" + (pr.to + d.line - pr.from));
+    return body.map((l) => l.trim() === spec.target ? l.replace(spec.target, moved) : l);
+  }
+  // What sits on a spot's line: a declaration, or the file's own entry at the top of the
+  // file. The file entry counts — `sym:Player` is satisfied by Player.cs as much as by
+  // class Player, so refusing to offer that pin would make the menu disagree with the marks.
+  declAtSite(site) {
+    const here = this.entriesIn(site.rel).filter((e) => e.line === site.line);
+    return here.find((e) => e.kind !== "file") || here[0];
+  }
+  // What one pin would do: the title it'd produce and the value it pins to, for the menu
+  // to show. Anchors add up rather than replace, so pinning symbol then kind narrows the
+  // same spot. Null when there's nothing to pin to, or when it would change nothing.
+  pinOption(site, current, anchor) {
+    if (!site)
+      return null;
+    const next = Object.assign({ sym: "", kind: "", hash: "" }, parseBinding(current));
+    let value;
+    if (anchor === "line") {
+      next.hash = hashLine(site.text);
+      value = String(site.line);
+    } else {
+      const decl = this.declAtSite(site);
+      if (!decl)
+        return null;
+      value = anchor === "sym" ? decl.name : decl.kind;
+      next[anchor] = value;
+    }
+    const title = formatBinding(next);
+    return title === (current || "") ? null : { title, value, site };
+  }
+  linkPinOption(link, anchor) {
+    return this.pinOption(this.linkSite(link.target), splitTarget(link.target).title, anchor);
+  }
+  // The spot a ```code-link block's window is frozen at — the same shape linkSite gives,
+  // so an embed pins through exactly the code a link does.
+  embedSite(spec) {
+    const pr = splitPathRange(spec.target);
+    if (!pr || spec.lines)
+      return null;
+    const rel = resolvePath(this, pr.path);
+    const text = this.lineTextAt(rel, pr.from);
+    return text == null ? null : { rel, line: pr.from, text };
+  }
+  // Put a block's edited body back into its note. An open editor keeps cursor and undo;
+  // in reading view there's none, so the file is rewritten through the vault.
+  async writeEmbedBody(sourcePath, info, body) {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const editor = view && view.editor;
+    if (editor) {
+      editor.replaceRange(body.join("\n") + "\n", { line: info.lineStart + 1, ch: 0 }, { line: info.lineEnd, ch: 0 });
+      return;
+    }
+    const file = this.app.vault.getAbstractFileByPath(sourcePath);
+    if (!file) {
+      new Notice(t("notice.cantBind"));
+      return;
+    }
+    const lines = (await this.app.vault.read(file)).split("\n");
+    lines.splice(info.lineStart + 1, info.lineEnd - info.lineStart - 1, ...body);
+    await this.app.vault.modify(file, lines.join("\n"));
+  }
+  pinLink(editor, link, anchor) {
+    const p = this.linkPinOption(link, anchor);
+    if (!p) {
+      new Notice(t("notice.cantBind"));
+      return;
+    }
+    this.retitleLink(editor, link, p.title);
+    new Notice(t("notice.bound", { line: p.site.line }));
+  }
+  // Drop a link's binding. Nothing tracks it, nothing marks it, nothing rewrites it — it
+  // goes back to being an ordinary markdown link that happens to point at code.
+  unbindLink(editor, link) {
+    this.retitleLink(editor, link, "");
+    new Notice(t("notice.unbound"));
+  }
+  linkAtCursorBound(link) {
+    return !!parseBinding(splitTarget(link.target).title);
+  }
+  retitleLink(editor, link, title) {
+    const { url } = splitTarget(link.target);
+    const out = "[" + link.name + "](" + withTitle(url, title) + ")";
+    editor.replaceRange(out, { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
+  }
+  // setSubmenu landed after the manifest's minAppVersion, so ask a throwaway menu rather
+  // than assume: on older builds the pins fall back to flat items instead of vanishing.
+  submenuSupported() {
+    if (this._submenu == null) {
+      this._submenu = false;
+      try {
+        new Menu().addItem((i) => {
+          this._submenu = typeof i.setSubmenu === "function";
+        });
+      } catch (e) {
+      }
+    }
+    return this._submenu;
+  }
+  // The pins, in a submenu: they're a set, and they'd crowd the menu otherwise. Each is
+  // labelled with what it would pin to — "symbol" and "kind" mean nothing until you see
+  // Player and class.
+  addPinItems(menu, option, run) {
+    const opts = ["sym", "kind", "line"].map((a) => [a, option(a)]).filter(([, o]) => o);
+    if (!opts.length)
+      return;
+    const add = (m, a, o) => m.addItem((i) => i.setTitle(t("menu.pin." + a, { value: o.value })).setIcon("pin").onClick(() => run(a)));
+    if (!this.submenuSupported()) {
+      for (const [a, o] of opts)
+        add(menu, a, o);
+      return;
+    }
+    menu.addItem((item) => {
+      item.setTitle(t("menu.pin")).setIcon("pin");
+      const sub = item.setSubmenu();
+      for (const [a, o] of opts)
+        add(sub, a, o);
+    });
+  }
+  // A right-click item on the code link under the cursor, mirrored into the palette so
+  // every one of them is reachable without the mouse. `can` gates both.
+  addLinkCommand(id, name, can, run) {
+    this.addCommand({
+      id,
+      name,
+      editorCheckCallback: (checking, editor) => {
+        const link = this.codeLinkAtCursor(editor);
+        if (!link || !this.isCodeLink(link.target) || !can(link))
+          return false;
+        if (!checking)
+          run(editor, link);
+        return true;
+      }
+    });
+  }
+  // Insert a link to a chosen line of a chosen file — for pointing at something the index
+  // has no name for. Like any insert it leaves the link unbound; pin it to track it.
+  insertLineLink(editor, template) {
+    this.pickEntry((e) => new LinePromptModal(this.app, e.line || 1, (line) => {
+      const at = Object.assign({}, e, { line, kind: e.kind === "file" ? "line" : e.kind });
+      const link = "[" + e.name + ":" + line + "](" + this.buildUri(at, template) + ")";
+      const inTable = inTableCell(editor.getValue(), editor.posToOffset(editor.getCursor("from")));
+      editor.replaceSelection(inTable ? link.replace(/\|/g, "\\|") : link);
+    }).open());
   }
   // Copy the clicked link's own target ({root} filled in), keeping the scheme it was
   // saved with — unlike copyLink, which builds a fresh link from the default preset.
   copyLinkAtCursor(link) {
-    navigator.clipboard.writeText(this.fillRoot(link.target));
+    navigator.clipboard.writeText(this.fillRoot(splitTarget(link.target).url));
     new Notice(t("notice.copied"));
   }
   // Run the selected (or under-cursor) token through the index: a single match runs

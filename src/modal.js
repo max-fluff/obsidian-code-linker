@@ -1,6 +1,6 @@
 'use strict';
 
-const { FuzzySuggestModal } = require('obsidian');
+const { FuzzySuggestModal, Modal, Setting } = require('obsidian');
 const { t } = require('./shared/i18n');
 
 // Full-screen picker over the code index. The caller supplies what to do with the
@@ -52,4 +52,36 @@ class PresetPickerModal extends FuzzySuggestModal {
   onChooseItem(p) { this.onChoose(p); }
 }
 
-module.exports = { CodeLinkModal, PresetPickerModal };
+// Asks which line of the chosen file to link to, defaulting to the entry's own.
+class LinePromptModal extends Modal {
+  constructor(app, line, onSubmit) {
+    super(app);
+    this.line = String(line);
+    this.onSubmit = onSubmit;
+  }
+
+  onOpen() {
+    this.titleEl.setText(t('modal.linePrompt'));
+    new Setting(this.contentEl).addText((c) => {
+      c.setValue(this.line).onChange((v) => { this.line = v; });
+      c.inputEl.type = 'number';
+      c.inputEl.min = '1';
+      c.inputEl.focus();
+      c.inputEl.select();
+      c.inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.submit(); });
+    });
+    new Setting(this.contentEl).addButton((b) =>
+      b.setButtonText(t('modal.lineSubmit')).setCta().onClick(() => this.submit()));
+  }
+
+  submit() {
+    const n = parseInt(this.line, 10);
+    if (!(n >= 1)) return;
+    this.close();
+    this.onSubmit(n);
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
+
+module.exports = { CodeLinkModal, PresetPickerModal, LinePromptModal };
