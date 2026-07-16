@@ -1,11 +1,14 @@
 name: Release
 
-# Builds the plugin and attaches attested main.js, manifest.json and styles.css
-# to a published release.
+# Builds the plugin and opens a draft release with attested main.js, manifest.json and
+# styles.css already attached. Publishing stays manual, so a release is never visible —
+# or reviewable — before its assets are there, and they're only ever the ones CI built:
+# a hand-attached file has a different digest (a working copy keeps CRLF, the repo is LF)
+# and its attestation won't verify.
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
 
 permissions:
   contents: write
@@ -35,9 +38,10 @@ jobs:
             manifest.json
             styles.css
 
-      - name: Upload assets to the release
+      - name: Open a draft release with the assets attached
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release upload "${{ github.event.release.tag_name }}"
-          main.js manifest.json styles.css --clobber
+          gh release create "${{ github.ref_name }}"
+          --draft --title "${{ github.ref_name }}"
+          main.js manifest.json styles.css
