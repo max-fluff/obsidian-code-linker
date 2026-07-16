@@ -1,6 +1,6 @@
 {
   "name": "obsidian-code-linker",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Obsidian plugin: autocomplete references to source-code files and types, inserting an editor deep-link.",
   "author": "max-fluff",
   "license": "MIT",
