@@ -37,7 +37,7 @@ const filter = require('./filter');
 const { HoverPreview } = require('./hover');
 const { registerEmbed, parseSpec, splitPathRange, resolvePath } = require('./embed');
 const actualize = require('./actualize');
-const { CodeLinkModal, PresetPickerModal, LinePromptModal } = require('./modal');
+const { CodeLinkModal, PresetPickerModal, LinePromptModal, PinAnchorModal } = require('./modal');
 const { CodeLinkerSettingTab } = require('./settings-tab');
 const { initI18n, t, plural } = require('./shared/i18n');
 const api = require('./api');
@@ -124,8 +124,8 @@ class CodeLinkerPlugin extends Plugin {
         (link) => !!this.linkPinOption(link, anchor), (editor, link) => this.pinLink(editor, link, anchor));
     }
     this.addLinkCommand('unpin-code-link', t('menu.unpin'), (link) => this.linkAtCursorBound(link), (editor, link) => this.unbindLink(editor, link));
-    this.addCommand({ id: 'pin-links-note', name: t('cmd.pinLinksNote'), callback: () => this.pinLinksInActiveNote() });
-    this.addCommand({ id: 'pin-links-vault', name: t('cmd.pinLinksVault'), callback: () => this.pinLinksInVault() });
+    this.addCommand({ id: 'pin-links-note', name: t('cmd.pinLinksNote'), callback: () => this.pickPinAnchors((a) => this.pinLinksInActiveNote(a)) });
+    this.addCommand({ id: 'pin-links-vault', name: t('cmd.pinLinksVault'), callback: () => this.pickPinAnchors((a) => this.pinLinksInVault(a)) });
     this.addCommand({ id: 'insert-code-embed', name: t('cmd.insertEmbed'), editorCallback: (editor) => this.pickEntry((e) => this.insertEmbed(editor, e)) });
     this.addCommand({ id: 'update-links-note', name: t('cmd.updateLinksNote'), callback: () => this.updateLinksInActiveNote() });
     this.addCommand({ id: 'update-links-vault', name: t('cmd.updateLinksVault'), callback: () => this.updateLinksInVault() });
@@ -578,14 +578,69 @@ class CodeLinkerPlugin extends Plugin {
 
   // What a binding says about a spot in `rel`: null when it still sits on a match,
   // { state: 'stale', line } with where it moved to, or { state: 'broken' } when nothing
-  // in the file meets it any more. One answer for links and embeds alike.
+  // in the file meets it any more. Judges within one file the index knows; the caller
+  // decides what an unknown file means.
   bindState(rel, b, storedLine) {
     return bindStateFrom(this.bindingHitsIn(rel, b), storedLine);
   }
 
-  // The same, for a link: its url names the file.
+  // What a link's binding says, as three states. Broken is reserved for a file the index
+  // *has* whose binding is truly gone — never for a file it doesn't know (wrong code root,
+  // an unindexed folder, a moved file). An unknown file is judged silently: stale if the
+  // binding turns up elsewhere, else no verdict at all, so nothing is marked on a guess.
   urlBindState(url, b, storedLine) {
-    return this.bindState(this.targetIndexedFile(this.decodeTarget(url)), b, storedLine);
+    const dec = this.decodeTarget(url);
+    const rel = this.targetIndexedFile(dec);
+    const here = rel ? this.bindState(rel, b, storedLine) : null;
+    if (here && here.state === 'stale') return here;          // moved within its own file
+    if (here && here.state === 'broken') return this.movedBindState(url, dec, b, rel, storedLine) || here;
+    if (!rel) return this.movedBindState(url, dec, b, null, storedLine);
+    return here;                                              // null: still current
+  }
+
+  // Where a link's code moved to, as a stale state carrying the rewritten url, or null when
+  // there's no confident move. Reported only when fixable: the new file must satisfy the
+  // binding and the old path must be locatable in the url to rewrite.
+  movedBindState(url, dec, b, fromRel, storedLine) {
+    const rel2 = this.moveTarget(dec, b, fromRel);
+    if (!rel2) return null;
+    const hits = this.bindingHitsIn(rel2, b);
+    if (!hits.length) return null;
+    const oldRel = this.urlPathAnchor(url, fromRel);
+    if (oldRel == null) return null;
+    const line = hits.reduce((a, n) => (Math.abs(n - storedLine) < Math.abs(a - storedLine) ? n : a));
+    const rewritten = url.split(oldRel).join(rel2).replace(LINE_RE, ':' + line);
+    return { state: 'stale', line, url: rewritten, move: { from: oldRel, to: rel2 } };
+  }
+
+  // The one indexed file a moved binding now lives in, or null when it's ambiguous or
+  // unfound. Two signals, each for a different refactor: a unique declaration of the symbol
+  // (the file was renamed) or a lone file with the same basename (the file was moved).
+  moveTarget(dec, b, fromRel) {
+    if (b.sym) {
+      const e = this.uniqueSymbolEntry(b.sym);
+      if (e && e.path !== fromRel && this.bindingHitsIn(e.path, b).length) return e.path;
+    }
+    const base = (dec.split('/').pop() || '').split(/[:#?]/)[0];
+    if (base) {
+      const cands = [];
+      for (const rel of this.fileCache.keys()) {
+        if (rel !== fromRel && rel.split('/').pop() === base && this.bindingHitsIn(rel, b).length) cands.push(rel);
+      }
+      if (cands.length === 1) return cands[0];
+    }
+    return null;
+  }
+
+  // The code-root-relative path as it sits verbatim in the url, so a move can swap just that
+  // run: `fromRel` when the old file is still indexed, else the run after the {root}/ or
+  // path= anchor. Git permalinks never reach here (their `#L` line dodges LINE_RE), so only
+  // the `:line` presets need handling. Null when it can't be located — then the move is left
+  // silent rather than half-rewritten.
+  urlPathAnchor(url, fromRel) {
+    if (fromRel && url.includes(fromRel)) return fromRel;
+    const m = /(?:\{root\}\/|path=)(.+?)(?::\d+)?$/.exec(url);
+    return m && url.includes(m[1]) ? m[1] : null;
   }
 
   // The single entry a bare symbol resolves to (a declaration preferred over the file
@@ -964,6 +1019,10 @@ class CodeLinkerPlugin extends Plugin {
     new CodeLinkModal(this.app, this, { onChoose, query }).open();
   }
 
+  pickPinAnchors(run) {
+    new PinAnchorModal(this.app, run).open();
+  }
+
   insertLink(editor, e, template) {
     if (this.gitTemplateBlocked(e, template)) return;
     const inTable = inTableCell(editor.getValue(), editor.posToOffset(editor.getCursor('from')));
@@ -1196,12 +1255,12 @@ class CodeLinkerPlugin extends Plugin {
     new Notice(t('notice.linksUpdated', { n: 1 }));
   }
 
-  // Whether a markdown link is one of ours rather than a wiki or web link. It's the url
-  // that decides, not the text or the binding: a link whose text you rewrote and whose
-  // binding is gone is still ours, and it's exactly the one you'd want to pin.
+  // Whether a markdown link is one of ours rather than a wiki or web link: its url points at
+  // an indexed file, or it carries one of our bindings. A moved file points nowhere indexed
+  // but is still ours; a binding only uses our tokens, so it won't match a reader's tooltip.
   isCodeLink(target) {
-    const { url } = splitTarget(target);
-    return !!url && !!this.targetIndexedFile(this.decodeTarget(url));
+    const { url, title } = splitTarget(target);
+    return !!url && (!!parseBinding(title) || !!this.targetIndexedFile(this.decodeTarget(url)));
   }
 
   // A link's file and stored line as { rel, line, text }, or null when it doesn't point
@@ -1225,19 +1284,26 @@ class CodeLinkerPlugin extends Plugin {
     return line >= 1 && line <= lines.length ? lines[line - 1] : null;
   }
 
-  // A ```code-link block's body with its target line brought up to date, or null when
-  // there's nothing to fix. Only the numbers move: the path is written the way the reader
-  // wrote it (a tail like "http-client.ts" resolves fine), and a range keeps its length.
-  actualizedEmbed(body) {
+  // Where a ```code-link block's window has drifted, for the preview and the rewrite:
+  // { state:'stale', path, from, to, out } with the body brought up to date, or
+  // { state:'broken', path } when the binding is lost, or null when there's nothing to
+  // judge or it's still current. Only the numbers move: the path is written the way the
+  // reader wrote it (a tail like "http-client.ts" resolves fine), and a range keeps length.
+  embedDrift(body) {
     const spec = parseSpec(body.join('\n'));
     const b = parseBinding(spec.bind);
     if (!b || spec.lines) return null;
     const pr = splitPathRange(spec.target);
     if (!pr) return null;
-    const d = this.bindState(resolvePath(this, pr.path), b, pr.from);
-    if (!d || d.state !== 'stale') return null;
+    const rel = resolvePath(this, pr.path);
+    const d = this.bindState(rel, b, pr.from);
+    if (!d) return null;
+    // Broken only for a file the index knows; an unindexed path stays silent, the same way
+    // a link does, rather than claiming code is gone when we simply never scanned it.
+    if (d.state === 'broken') return this.fileCache.has(rel) ? { state: 'broken', path: pr.path } : null;
     const moved = pr.path + ':' + d.line + (pr.single ? '' : '-' + (pr.to + d.line - pr.from));
-    return body.map((l) => (l.trim() === spec.target ? l.replace(spec.target, moved) : l));
+    const out = body.map((l) => (l.trim() === spec.target ? l.replace(spec.target, moved) : l));
+    return { state: 'stale', path: pr.path, from: pr.from, to: d.line, out };
   }
 
   // What sits on a spot's line: a declaration, or the file's own entry at the top of the
@@ -1270,6 +1336,20 @@ class CodeLinkerPlugin extends Plugin {
 
   linkPinOption(link, anchor) {
     return this.pinOption(this.linkSite(link.target), splitTarget(link.target).title, anchor);
+  }
+
+  // A binding title for a bulk pin over `site`, from the chosen anchors. They intersect,
+  // so symbol + line pins to the exact declaration and won't repin to a same-named one.
+  // Null when an anchor can't be met: no declaration for sym/kind, or a blank line for
+  // line — a blank line hashes to nothing the index keeps, so that pin is broken at birth.
+  buildPinTitle(site, anchors) {
+    if (!site) return null;
+    const b = { sym: '', kind: '', hash: '' };
+    const decl = (anchors.sym || anchors.kind) ? this.declAtSite(site) : null;
+    if (anchors.sym) { if (!decl) return null; b.sym = decl.name; }
+    if (anchors.kind) { if (!decl || !decl.kind) return null; b.kind = decl.kind; }
+    if (anchors.line) { if (!site.text.trim()) return null; b.hash = hashLine(site.text); }
+    return b.sym || b.kind || b.hash ? formatBinding(b) : null;
   }
 
   // The spot a ```code-link block's window is frozen at — the same shape linkSite gives,

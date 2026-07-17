@@ -169,6 +169,9 @@ class CodeEmbed extends MarkdownRenderChild {
     const menu = new Menu();
     if (res.entry) menu.addItem((i) => i.setTitle(t('embed.menu.open')).setIcon('go-to-file').onClick(() => this.open()));
     menu.addItem((i) => i.setTitle(t('embed.menu.refresh')).setIcon('refresh-cw').onClick(() => this.render(true)));
+    if (res.drift && res.drift.state === 'stale') {
+      menu.addItem((i) => i.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fix()));
+    }
     // The same pins a link gets: an embed frozen to a line drifts exactly like one.
     const p = this.plugin;
     const site = p.embedSite(this.spec);
@@ -183,6 +186,17 @@ class CodeEmbed extends MarkdownRenderChild {
     const o = this.plugin.pinOption(this.plugin.embedSite(this.spec), this.spec.bind, anchor);
     if (!o) { new Notice(t('notice.cantBind')); return; }
     this.setBind(o.title);
+  }
+
+  // Bring this embed's frozen line up to date — the fence-body twin of a link's Fix.
+  async fix() {
+    const info = this.ctx.getSectionInfo && this.ctx.getSectionInfo(this.containerEl);
+    if (!info) { new Notice(t('notice.cantBind')); return; }
+    const body = info.text.split('\n').slice(info.lineStart + 1, info.lineEnd);
+    const d = this.plugin.embedDrift(body);
+    if (!d || d.state !== 'stale') { new Notice(t('notice.linksUpdated', { n: 0 })); return; }
+    await this.plugin.writeEmbedBody(this.ctx.sourcePath, info, d.out);
+    new Notice(t('notice.linksUpdated', { n: 1 }));
   }
 
   // Rewrite this block's bind: line in the note itself. getSectionInfo gives the fence's
@@ -261,4 +275,4 @@ function registerEmbed(plugin) {
   });
 }
 
-module.exports = { registerEmbed, parseSpec, splitPathRange, resolvePath };
+module.exports = { registerEmbed, parseSpec, splitPathRange, resolvePath, setBindLine };

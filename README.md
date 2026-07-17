@@ -100,7 +100,7 @@ Selection-driven commands resolve the selected name or path (or the token under 
 - **Find and convert to link** — replace the selection with a link.
 - **Find and open code** — open the matching file in your editor.
 
-Right-clicking an existing code link (rather than a plain selection) adds link-specific items: **Copy code link** copies that link's resolved target to the clipboard (`{root}` filled in), a **Pin this code link** submenu chooses what it should track, **Unpin** stops tracking, and **Update this code link** appears once a pinned link has drifted (see [Keeping links current](#keeping-links-current)). Right-clicking a rendered embed offers the same pins.
+Right-clicking an existing code link (rather than a plain selection) adds link-specific items: **Copy code link** copies that link's resolved target to the clipboard (`{root}` filled in), a **Pin this code link** submenu chooses what it should track, **Unpin** stops tracking, and **Update this code link** appears once a pinned link has drifted (see [Keeping links current](#keeping-links-current)). Right-clicking a rendered embed offers the same pins, plus **Update** once it has drifted.
 
 <p align="center">
   <img src="docs/images/context-menu-1.png" alt="The editor right-click menu showing Find and convert to link and Find and open code" width="420">
@@ -170,12 +170,15 @@ The pins have opposite weak spots, which is why you can combine them: a symbol s
 
 Once pinned:
 
-- **Mark stale links** (on by default) underlines pinned links that need attention, in reading view and live preview alike: a **warning-coloured** underline when the code moved (fixable), and an **error-coloured** one when nothing in the file meets the pin any more — renamed, removed, or the line rewritten.
-- **Update code links in this note** / **…in the whole vault** rewrite drifted lines to where the code went. Moving to another line matching the pin is not drift: a link pinned to `sym:TakeDamage` is happy on either `TakeDamage`.
+- **Mark stale links** (on by default) underlines pinned links that need attention, in reading view and live preview alike: a **warning-coloured** underline when the code moved and can be fixed, and an **error-coloured** one when nothing in the file meets the pin any more — the symbol was renamed or removed, or the line rewritten. A link whose file the index doesn't know — outside your scan folders, or not yet indexed — is left unmarked, not flagged.
+- Rename or move a pinned file and the link follows it: the symbol turns up in its new file, so the link is marked fixable rather than broken, as long as the match is unambiguous.
+- **Update code links in this note** / **…in the whole vault** open a preview first. Every change is listed per note with a checkbox, moves show the new path, and links that can't be fixed are listed apart. Tick what you want and apply — a note you edited since opening the preview is skipped, not overwritten.
 - Right-click a drifted link and choose **Update this code link** to fix just that one.
 - **Unpin this code link** stops the tracking. Moved a line on purpose? Pin it again — the new pin replaces the argument.
 
-Notes written before pinning existed can catch up in one go: **Pin unpinned code links in this note** / **…in the whole vault** pins every link whose text names the symbol on its line.
+Moving to another line matching the pin is not drift: a link pinned to `sym:TakeDamage` is happy on either `TakeDamage`.
+
+Notes written before pinning existed can catch up in one go: **Pin unpinned code links and embeds in this note** / **…in the whole vault** ask what to pin to — symbol, kind, exact line, or a combination (symbol + line by default) — and pin every unpinned link and embed on its line.
 
 Embeds work the same way, with the pin written as a `bind:` line:
 
@@ -186,7 +189,7 @@ bind: sym:TakeDamage line:1xg3bnk
 ```
 ````
 
-A symbol embed (`TakeDamage` on its own) re-resolves on every render and needs no pin. One frozen to a `path:line` or a range does — pin it from the block's right-click menu, and the update commands will keep it honest. A drifted embed says so in its header, since the snippet it shows is no longer the code you meant.
+A symbol embed (`TakeDamage` on its own) re-resolves on every render and needs no pin. One frozen to a `path:line` or a range does — pin it from the block's right-click menu. A drifted embed says so in its header; right-click it and choose **Update this code link** to bring it up to date, or run one of the update commands.
 
 ## Languages
 
@@ -238,8 +241,8 @@ Each enabled language lists the entity kinds it actually put in the index (e.g. 
 - **Convert selection to code link** / **Find and open code** — resolve the selection against the index, then convert it or open the file (one match acts directly, several open the picker).
 - **Switch editor preset** — change the default editor without opening settings.
 - With the cursor on a code link: **Pin code link to its symbol / kind / exact line**, **Unpin code link**, **Update this code link**, **Copy code link** (see [Keeping links current](#keeping-links-current)).
-- **Update code links in this note** / **…in the whole vault** — rewrite drifted lines in pinned links and embeds.
-- **Pin unpinned code links in this note** / **…in the whole vault** — catch up notes written before pinning existed.
+- **Update code links in this note** / **…in the whole vault** — preview and apply fixes to drifted pinned links and embeds.
+- **Pin unpinned code links and embeds in this note** / **…in the whole vault** — catch up notes written before pinning existed.
 - **Rebuild code index**.
 
 The selection commands and the link actions are also in the editor's right-click menu — see [Selection commands and the context menu](#selection-commands-and-the-context-menu).
@@ -281,7 +284,7 @@ The selection commands and the link actions are also in the editor's right-click
 **Stale links**
 | Setting | Default | What it does |
 | --- | --- | --- |
-| **Mark stale links** | on | Underline pinned links whose code moved (warning colour) or whose pin no longer matches anything (error colour). Unpinned links are never marked. See [Keeping links current](#keeping-links-current). |
+| **Mark stale links** | on | Underline pinned links whose code moved and can be fixed (warning colour) or whose pin no longer matches its file (error colour). A link whose file isn't indexed, like any unpinned link, is left unmarked. See [Keeping links current](#keeping-links-current). |
 
 **Scan vs. skip folders.** *Scan folders* say where indexing **starts** — specific paths relative to the code root; leave the list empty to scan the whole code root. *Skip folders* then **prune** what's found, and take two forms:
 
