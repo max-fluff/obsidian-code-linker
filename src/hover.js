@@ -2,54 +2,39 @@
 
 // Our own popover, not Obsidian's HoverPopover (which hides as soon as the pointer
 // leaves the link), so you can scroll and select inside the preview.
+//
+// The shell — timing, placement, the stale-render guard — is shared/popover.js. What is
+// ours is the snippet: the lines around the target, syntax-highlighted, scrolled so the
+// line the link points at sits in the middle.
 
 const nodePath = require('path');
 const { readLines, renderCode } = require('./render');
-
-const SHOW_DELAY = 200;
-const HIDE_GRACE = 250;
+const { Popover } = require('./shared/popover');
 
 const keyOf = (e) => e.path + ':' + e.line;
 
 class HoverPreview {
   constructor(plugin) {
     this.plugin = plugin;
-    this.el = null;
-    this.timer = null;
-    this.hideTimer = null;
-    this.key = '';        // path:line currently shown
-    this.pendingKey = ''; // path:line scheduled next
+    this.pop = new Popover({ cls: 'code-linker-hover code-linker-code', hiddenCls: 'code-linker-hidden' });
   }
 
-  ensureEl() {
-    if (!this.el) {
-      this.el = document.body.createDiv({ cls: 'code-linker-hover code-linker-code code-linker-hidden' });
-      this.el.addEventListener('mouseenter', () => this.cancelHide());
-      this.el.addEventListener('mouseleave', () => this.leave());
-    }
-    return this.el;
-  }
+  // Read from onHoverMove to tell "nothing scheduled" from "waiting to show". It lives on
+  // the shell now, so it is forwarded rather than duplicated.
+  get pendingKey() { return this.pop.pendingKey; }
 
-  isVisible() { return !!this.el && !this.el.classList.contains('code-linker-hidden'); }
-  contains(node) { return !!this.el && !!node && this.el.contains(node); }
-  cancelHide() { clearTimeout(this.hideTimer); this.hideTimer = null; }
+  isVisible() { return this.pop.isVisible(); }
+  contains(node) { return this.pop.contains(node); }
+  cancelHide() { this.pop.cancelHide(); }
+  leave() { this.pop.leave(); }
+  hide() { this.pop.hide(); }
+  destroy() { this.pop.destroy(); }
 
   schedule(entry, x, y) {
-    this.cancelHide();
-    const key = keyOf(entry);
-    if (key === this.key && this.isVisible()) return;
-    if (key === this.pendingKey) return;
-    this.pendingKey = key;
-    clearTimeout(this.timer);
-    this.timer = setTimeout(() => { this.pendingKey = ''; this.show(entry, x, y); }, SHOW_DELAY);
+    this.pop.schedule(keyOf(entry), x, y, (el, ctx) => this.build(entry, el, ctx));
   }
 
-  leave() {
-    if (this.hideTimer) return;
-    this.hideTimer = setTimeout(() => this.hide(), HIDE_GRACE);
-  }
-
-  async show(entry, x, y) {
+  async build(entry, el, ctx) {
     const s = this.plugin.settings;
     const root = this.plugin.codeRoot();
     const abs = root ? nodePath.join(root, entry.path) : entry.path;
@@ -58,11 +43,8 @@ class HoverPreview {
     const before = s.hoverBefore < 0 ? Infinity : Math.max(0, s.hoverBefore | 0);
     const after = s.hoverAfter < 0 ? Infinity : Math.max(0, s.hoverAfter | 0);
     const snippet = await readLines(abs, line - before, line + after);
-    if (!snippet) return;
+    if (!snippet || !ctx.isCurrent()) return false;
 
-    this.key = keyOf(entry);
-    const el = this.ensureEl();
-    el.empty();
     el.createDiv({ cls: 'code-linker-hover-header', text: keyOf(entry) });
     const body = el.createDiv({ cls: 'code-linker-hover-body' });
 
@@ -71,39 +53,13 @@ class HoverPreview {
     band.style.top = 'calc(var(--cl-lh) * ' + idx + ')';
 
     await renderCode(body, snippet.lines.join('\n'), this.plugin.prismIdFor(entry.lang));
+    if (!ctx.isCurrent()) return false;
 
-    // Reveal (display via CSS class) but keep it invisible and off-screen while we
-    // measure, then place near the cursor, flipping when it would overflow. The final
-    // coordinates are dynamic, so left/top stay inline.
-    el.style.visibility = 'hidden';
-    el.style.left = '-9999px';
-    el.style.top = '0px';
-    el.removeClass('code-linker-hidden');
-    body.scrollTop = Math.max(0, band.offsetTop - (body.clientHeight - band.offsetHeight) / 2); // center the target line
-    const r = el.getBoundingClientRect();
-    const pad = 12;
-    let left = x + pad;
-    let top = y + pad;
-    if (left + r.width > window.innerWidth - pad) left = Math.max(pad, x - pad - r.width);
-    if (top + r.height > window.innerHeight - pad) top = Math.max(pad, y - pad - r.height);
-    el.style.left = left + 'px';
-    el.style.top = top + 'px';
-    el.style.visibility = 'visible';
-  }
-
-  hide() {
-    clearTimeout(this.timer);
-    clearTimeout(this.hideTimer);
-    this.hideTimer = null;
-    this.pendingKey = '';
-    this.key = '';
-    if (this.el) { this.el.addClass('code-linker-hidden'); this.el.empty(); }
-  }
-
-  destroy() {
-    clearTimeout(this.timer);
-    clearTimeout(this.hideTimer);
-    if (this.el) { this.el.remove(); this.el = null; }
+    // Centring the target line needs the element laid out, so it runs once the shell has
+    // revealed it and before it is measured for placement.
+    return () => {
+      body.scrollTop = Math.max(0, band.offsetTop - (body.clientHeight - band.offsetHeight) / 2);
+    };
   }
 }
 

@@ -565,6 +565,13 @@ var require_discover = __commonJS({
             open: (sourcePath, newTab) => {
               if (typeof peer.open === "function")
                 peer.open(m.target, sourcePath, newTab);
+            },
+            // The peer previews its own target: only it knows whether that means a note, a
+            // heading anchor or something else. A peer too old to publish this simply has no
+            // preview in the list, which is the behaviour it had before the list existed.
+            hover: (event, targetEl, sourcePath, hoverParent) => {
+              if (typeof peer.hover === "function")
+                peer.hover(m.target, event, targetEl, sourcePath, hoverParent);
             }
           });
         }
@@ -573,6 +580,39 @@ var require_discover = __commonJS({
     }
     function candidatesFor(candidates, s, e) {
       return candidates.filter((c) => c.start < e && c.end > s);
+    }
+    function peerSuggestions(app, self, query) {
+      const out = [];
+      for (const peer of discoverLinkers(app)) {
+        if (peer.id === self.id || typeof peer.suggest !== "function")
+          continue;
+        let items;
+        try {
+          items = peer.suggest(String(query || "")) || [];
+        } catch (e) {
+          items = [];
+        }
+        for (const it of items) {
+          if (!it || typeof it.label !== "string")
+            continue;
+          out.push({
+            label: it.label,
+            note: it.note || "",
+            target: it.target,
+            // What the inserted link should read. null (or absent) means "keep whatever the
+            // reader typed" — the peer says which, because only it knows whether its candidate
+            // matched an inflection of the typed word or completed a prefix of it.
+            display: it.display == null ? null : it.display,
+            id: peer.id,
+            source: peer.displayName || peer.id,
+            precedence: peer.precedence || 0,
+            // The peer builds its own link text: nobody else should have to know whether a
+            // target is a term title or a File#Heading.
+            insert: (display, inTable) => typeof peer.linkFor === "function" ? peer.linkFor(it.target, display, inTable) : null
+          });
+        }
+      }
+      return out;
     }
     function peersOffering2(app, self, kind, text) {
       const out = [];
@@ -593,7 +633,7 @@ var require_discover = __commonJS({
     function siblingLinkers(app, self) {
       return discoverLinkers(app).filter((p) => p.id !== self.id);
     }
-    module2.exports = { LINKER_API, discoverLinkers, outranks, foreignRanges, overlaps, ownedMatches, yieldedCandidates, candidatesFor, peersOffering: peersOffering2, siblingLinkers };
+    module2.exports = { LINKER_API, discoverLinkers, outranks, foreignRanges, overlaps, ownedMatches, yieldedCandidates, candidatesFor, peerSuggestions, peersOffering: peersOffering2, siblingLinkers };
   }
 });
 
@@ -1177,34 +1217,41 @@ var require_render = __commonJS({
   }
 });
 
-// src/hover.js
-var require_hover = __commonJS({
-  "src/hover.js"(exports2, module2) {
+// src/shared/popover.js
+var require_popover = __commonJS({
+  "src/shared/popover.js"(exports2, module2) {
     "use strict";
-    var nodePath2 = require("path");
-    var { readLines, renderCode } = require_render();
     var SHOW_DELAY = 200;
     var HIDE_GRACE = 250;
-    var keyOf = (e) => e.path + ":" + e.line;
-    var HoverPreview2 = class {
-      constructor(plugin) {
-        this.plugin = plugin;
+    var EDGE_PAD = 12;
+    var Popover = class {
+      // `cls` is the plugin's own class on the root element; `hiddenCls` defaults to `${cls}`
+      // with a -hidden suffix on the plugin's prefix, but both can be passed explicitly.
+      constructor(opts) {
+        this.cls = opts.cls;
+        this.hiddenCls = opts.hiddenCls;
+        this.showDelay = opts.showDelay == null ? SHOW_DELAY : opts.showDelay;
+        this.hideGrace = opts.hideGrace == null ? HIDE_GRACE : opts.hideGrace;
+        this.onHide = opts.onHide || null;
+        this.onDestroy = opts.onDestroy || null;
+        this.keepAlive = opts.keepAlive || null;
         this.el = null;
         this.timer = null;
         this.hideTimer = null;
         this.key = "";
         this.pendingKey = "";
+        this.token = 0;
       }
       ensureEl() {
         if (!this.el) {
-          this.el = document.body.createDiv({ cls: "code-linker-hover code-linker-code code-linker-hidden" });
+          this.el = document.body.createDiv({ cls: `${this.cls} ${this.hiddenCls}` });
           this.el.addEventListener("mouseenter", () => this.cancelHide());
           this.el.addEventListener("mouseleave", () => this.leave());
         }
         return this.el;
       }
       isVisible() {
-        return !!this.el && !this.el.classList.contains("code-linker-hidden");
+        return !!this.el && !this.el.classList.contains(this.hiddenCls);
       }
       contains(node) {
         return !!this.el && !!node && this.el.contains(node);
@@ -1213,9 +1260,10 @@ var require_hover = __commonJS({
         clearTimeout(this.hideTimer);
         this.hideTimer = null;
       }
-      schedule(entry, x, y) {
+      // Ask for `key` to be shown after the delay. Re-asking for what is already up, or already
+      // on its way, changes nothing — otherwise every mouse move would restart the timer.
+      schedule(key, x, y, build) {
         this.cancelHide();
-        const key = keyOf(entry);
         if (key === this.key && this.isVisible())
           return;
         if (key === this.pendingKey)
@@ -1224,46 +1272,43 @@ var require_hover = __commonJS({
         clearTimeout(this.timer);
         this.timer = setTimeout(() => {
           this.pendingKey = "";
-          this.show(entry, x, y);
-        }, SHOW_DELAY);
+          this.show(key, x, y, build);
+        }, this.showDelay);
       }
       leave() {
         if (this.hideTimer)
           return;
-        this.hideTimer = setTimeout(() => this.hide(), HIDE_GRACE);
+        this.hideTimer = setTimeout(() => {
+          this.hideTimer = null;
+          if (this.keepAlive && this.keepAlive()) {
+            this.leave();
+            return;
+          }
+          this.hide();
+        }, this.hideGrace);
       }
-      async show(entry, x, y) {
-        const s = this.plugin.settings;
-        const root = this.plugin.codeRoot();
-        const abs = root ? nodePath2.join(root, entry.path) : entry.path;
-        const line = entry.line || 1;
-        const before = s.hoverBefore < 0 ? Infinity : Math.max(0, s.hoverBefore | 0);
-        const after = s.hoverAfter < 0 ? Infinity : Math.max(0, s.hoverAfter | 0);
-        const snippet = await readLines(abs, line - before, line + after);
-        if (!snippet)
-          return;
-        this.key = keyOf(entry);
+      async show(key, x, y, build) {
+        const token = ++this.token;
+        const ctx = { isCurrent: () => token === this.token };
         const el = this.ensureEl();
         el.empty();
-        el.createDiv({ cls: "code-linker-hover-header", text: keyOf(entry) });
-        const body = el.createDiv({ cls: "code-linker-hover-body" });
-        const idx = Math.min(Math.max(0, line - snippet.startLine), snippet.lines.length - 1);
-        const band = body.createDiv({ cls: "code-linker-hover-band" });
-        band.style.top = "calc(var(--cl-lh) * " + idx + ")";
-        await renderCode(body, snippet.lines.join("\n"), this.plugin.prismIdFor(entry.lang));
+        const after = await build(el, ctx);
+        if (after === false || !ctx.isCurrent())
+          return;
+        this.key = key;
         el.style.visibility = "hidden";
         el.style.left = "-9999px";
         el.style.top = "0px";
-        el.removeClass("code-linker-hidden");
-        body.scrollTop = Math.max(0, band.offsetTop - (body.clientHeight - band.offsetHeight) / 2);
+        el.removeClass(this.hiddenCls);
+        if (typeof after === "function")
+          after();
         const r = el.getBoundingClientRect();
-        const pad = 12;
-        let left = x + pad;
-        let top = y + pad;
-        if (left + r.width > window.innerWidth - pad)
-          left = Math.max(pad, x - pad - r.width);
-        if (top + r.height > window.innerHeight - pad)
-          top = Math.max(pad, y - pad - r.height);
+        let left = x + EDGE_PAD;
+        let top = y + EDGE_PAD;
+        if (left + r.width > window.innerWidth - EDGE_PAD)
+          left = Math.max(EDGE_PAD, x - EDGE_PAD - r.width);
+        if (top + r.height > window.innerHeight - EDGE_PAD)
+          top = Math.max(EDGE_PAD, y - EDGE_PAD - r.height);
         el.style.left = left + "px";
         el.style.top = top + "px";
         el.style.visibility = "visible";
@@ -1274,18 +1319,90 @@ var require_hover = __commonJS({
         this.hideTimer = null;
         this.pendingKey = "";
         this.key = "";
+        this.token++;
+        if (this.onHide)
+          this.onHide();
         if (this.el) {
-          this.el.addClass("code-linker-hidden");
+          this.el.addClass(this.hiddenCls);
           this.el.empty();
         }
       }
       destroy() {
         clearTimeout(this.timer);
         clearTimeout(this.hideTimer);
+        this.token++;
+        if (this.onDestroy)
+          this.onDestroy();
         if (this.el) {
           this.el.remove();
           this.el = null;
         }
+      }
+    };
+    module2.exports = { Popover, SHOW_DELAY, HIDE_GRACE };
+  }
+});
+
+// src/hover.js
+var require_hover = __commonJS({
+  "src/hover.js"(exports2, module2) {
+    "use strict";
+    var nodePath2 = require("path");
+    var { readLines, renderCode } = require_render();
+    var { Popover } = require_popover();
+    var keyOf = (e) => e.path + ":" + e.line;
+    var HoverPreview2 = class {
+      constructor(plugin) {
+        this.plugin = plugin;
+        this.pop = new Popover({ cls: "code-linker-hover code-linker-code", hiddenCls: "code-linker-hidden" });
+      }
+      // Read from onHoverMove to tell "nothing scheduled" from "waiting to show". It lives on
+      // the shell now, so it is forwarded rather than duplicated.
+      get pendingKey() {
+        return this.pop.pendingKey;
+      }
+      isVisible() {
+        return this.pop.isVisible();
+      }
+      contains(node) {
+        return this.pop.contains(node);
+      }
+      cancelHide() {
+        this.pop.cancelHide();
+      }
+      leave() {
+        this.pop.leave();
+      }
+      hide() {
+        this.pop.hide();
+      }
+      destroy() {
+        this.pop.destroy();
+      }
+      schedule(entry, x, y) {
+        this.pop.schedule(keyOf(entry), x, y, (el, ctx) => this.build(entry, el, ctx));
+      }
+      async build(entry, el, ctx) {
+        const s = this.plugin.settings;
+        const root = this.plugin.codeRoot();
+        const abs = root ? nodePath2.join(root, entry.path) : entry.path;
+        const line = entry.line || 1;
+        const before = s.hoverBefore < 0 ? Infinity : Math.max(0, s.hoverBefore | 0);
+        const after = s.hoverAfter < 0 ? Infinity : Math.max(0, s.hoverAfter | 0);
+        const snippet = await readLines(abs, line - before, line + after);
+        if (!snippet || !ctx.isCurrent())
+          return false;
+        el.createDiv({ cls: "code-linker-hover-header", text: keyOf(entry) });
+        const body = el.createDiv({ cls: "code-linker-hover-body" });
+        const idx = Math.min(Math.max(0, line - snippet.startLine), snippet.lines.length - 1);
+        const band = body.createDiv({ cls: "code-linker-hover-band" });
+        band.style.top = "calc(var(--cl-lh) * " + idx + ")";
+        await renderCode(body, snippet.lines.join("\n"), this.plugin.prismIdFor(entry.lang));
+        if (!ctx.isCurrent())
+          return false;
+        return () => {
+          body.scrollTop = Math.max(0, band.offsetTop - (body.clientHeight - band.offsetHeight) / 2);
+        };
       }
     };
     module2.exports = { HoverPreview: HoverPreview2 };
@@ -2128,9 +2245,9 @@ var require_modal = __commonJS({
   }
 });
 
-// src/folder-suggest.js
+// src/shared/deeplink/folder-suggest.js
 var require_folder_suggest = __commonJS({
-  "src/folder-suggest.js"(exports2, module2) {
+  "src/shared/deeplink/folder-suggest.js"(exports2, module2) {
     "use strict";
     var obsidian = require("obsidian");
     var fs2 = require("fs");
@@ -2191,6 +2308,14 @@ var require_folder_suggest = __commonJS({
     };
     var folderSuggestAvailable = () => typeof AbstractInputSuggest === "function";
     module2.exports = { FolderSuggest, folderSuggestAvailable };
+  }
+});
+
+// src/folder-suggest.js
+var require_folder_suggest2 = __commonJS({
+  "src/folder-suggest.js"(exports2, module2) {
+    "use strict";
+    module2.exports = require_folder_suggest();
   }
 });
 
@@ -2337,7 +2462,7 @@ var require_settings_tab = __commonJS({
     "use strict";
     var { PluginSettingTab, Setting } = require("obsidian");
     var { PRESETS: PRESETS2, JETBRAINS_PRODUCTS: JETBRAINS_PRODUCTS2 } = require_constants();
-    var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest();
+    var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest2();
     var { renderFolderList } = require_folder_list();
     var { t: t2, plural: plural2 } = require_i18n();
     var { renderPrecedence: precedenceSetting } = require_precedence();
@@ -3016,8 +3141,8 @@ var require_en = __commonJS({
       // Plural noun phrases
       "plural.entry": { one: "{n} entry", other: "{n} entries" },
       "set.precedence.name": "Priority among linker plugins",
-      "set.precedence.desc": "When two linkers claim the same word or the same link, the one higher in this list wins and the other steps aside. Only this plugin\u2019s own position can be moved from here \u2014 move the others from their own settings.",
-      "set.precedence.other": "Move from that plugin\u2019s own settings",
+      "set.precedence.desc": "A word or link several linkers claim goes to the one highest in this list. You can only move this plugin \u2014 move the others from their own settings.",
+      "set.precedence.other": "Moved from its own settings",
       "set.precedence.up": "Move up",
       "set.precedence.down": "Move down"
     };
@@ -3219,8 +3344,8 @@ var require_ru = __commonJS({
       // Plural noun phrases
       "plural.entry": { one: "{n} \u0437\u0430\u043F\u0438\u0441\u044C", few: "{n} \u0437\u0430\u043F\u0438\u0441\u0438", many: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439", other: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439" },
       "set.precedence.name": "\u041F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442 \u0441\u0440\u0435\u0434\u0438 \u043F\u043B\u0430\u0433\u0438\u043D\u043E\u0432-\u043B\u0438\u043D\u043A\u0435\u0440\u043E\u0432",
-      "set.precedence.desc": "\u041A\u043E\u0433\u0434\u0430 \u0434\u0432\u0430 \u043B\u0438\u043D\u043A\u0435\u0440\u0430 \u043F\u0440\u0435\u0442\u0435\u043D\u0434\u0443\u044E\u0442 \u043D\u0430 \u043E\u0434\u043D\u043E \u0441\u043B\u043E\u0432\u043E \u0438\u043B\u0438 \u043E\u0434\u043D\u0443 \u0441\u0441\u044B\u043B\u043A\u0443, \u0432\u044B\u0438\u0433\u0440\u044B\u0432\u0430\u0435\u0442 \u0442\u043E\u0442, \u043A\u0442\u043E \u0432\u044B\u0448\u0435 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435, \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0443\u0441\u0442\u0443\u043F\u0430\u044E\u0442. \u041E\u0442\u0441\u044E\u0434\u0430 \u043C\u043E\u0436\u043D\u043E \u0434\u0432\u0438\u0433\u0430\u0442\u044C \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u043E\u0442 \u043F\u043B\u0430\u0433\u0438\u043D \u2014 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0438\u0437 \u0438\u0445 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u044B\u0445 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A.",
-      "set.precedence.other": "\u041F\u0435\u0440\u0435\u043C\u0435\u0441\u0442\u0438\u0442\u044C \u0438\u0437 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A \u0442\u043E\u0433\u043E \u043F\u043B\u0430\u0433\u0438\u043D\u0430",
+      "set.precedence.desc": "\u0421\u043B\u043E\u0432\u043E \u0438\u043B\u0438 \u0441\u0441\u044B\u043B\u043A\u0443, \u043D\u0430 \u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u043F\u0440\u0435\u0442\u0435\u043D\u0434\u0443\u044E\u0442 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043B\u0438\u043D\u043A\u0435\u0440\u043E\u0432, \u0437\u0430\u0431\u0438\u0440\u0430\u0435\u0442 \u0442\u043E\u0442, \u043A\u0442\u043E \u0432\u044B\u0448\u0435 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435. \u041E\u0442\u0441\u044E\u0434\u0430 \u0434\u0432\u0438\u0433\u0430\u0435\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u043E\u0442 \u043F\u043B\u0430\u0433\u0438\u043D \u2014 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0438\u0437 \u0441\u0432\u043E\u0438\u0445 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A.",
+      "set.precedence.other": "\u0414\u0432\u0438\u0433\u0430\u0435\u0442\u0441\u044F \u0438\u0437 \u0441\u0432\u043E\u0438\u0445 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A",
       "set.precedence.up": "\u0412\u044B\u0448\u0435",
       "set.precedence.down": "\u041D\u0438\u0436\u0435"
     };
