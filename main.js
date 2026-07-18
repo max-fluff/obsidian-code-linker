@@ -217,8 +217,12 @@ var require_constants = __commonJS({
       maxResults: 12,
       maxFileSizeKb: 2048,
       // 0 = no limit; larger files are indexed by name only, not parsed
-      contextMenu: true
+      contextMenu: true,
       // the "Convert"/"Find and open" items in the editor right-click menu
+      // Breaks a tie when a link lands in both our index and the reference linker's and carries
+      // no binding to say whose it is. A binding always decides on its own, so this only ever
+      // settles the genuinely ambiguous case.
+      linkPrecedence: 20
     };
     function parseSkip2(skipDirs) {
       const names = /* @__PURE__ */ new Set();
@@ -380,6 +384,252 @@ var require_root_token = __commonJS({
       return s.replace(tokenRe(LEGACY_TOKEN), "{" + OWNER_TOKENS[owner] + "}");
     }
     module2.exports = { OWNER_TOKENS, LEGACY_TOKEN, rootTokenIn, ownsRootToken: ownsRootToken2, fillRoot, namespaceRoot };
+  }
+});
+
+// src/shared/menu.js
+var require_menu = __commonJS({
+  "src/shared/menu.js"(exports2, module2) {
+    "use strict";
+    var obsidian = require("obsidian");
+    var submenuSupport = null;
+    function supportsSubmenu() {
+      if (submenuSupport !== null)
+        return submenuSupport;
+      submenuSupport = false;
+      try {
+        const probe = new obsidian.Menu();
+        probe.addItem((item) => {
+          submenuSupport = typeof item.setSubmenu === "function";
+        });
+      } catch (e) {
+        submenuSupport = false;
+      }
+      return submenuSupport;
+    }
+    function menuSection2(menu, label, grouped, icon) {
+      if (!grouped)
+        return menu;
+      if (!supportsSubmenu()) {
+        return {
+          addItem(cb) {
+            return menu.addItem((item) => {
+              const setTitle = item.setTitle.bind(item);
+              item.setTitle = (title) => setTitle(`${label}: ${title}`);
+              cb(item);
+            });
+          },
+          addSeparator() {
+            return menu.addSeparator();
+          }
+        };
+      }
+      let sub = null;
+      const ensure = () => {
+        if (!sub) {
+          menu.addItem((item) => {
+            item.setTitle(label);
+            if (icon)
+              item.setIcon(icon);
+            sub = item.setSubmenu();
+          });
+        }
+        return sub;
+      };
+      return {
+        addItem(cb) {
+          return ensure().addItem(cb);
+        },
+        addSeparator() {
+          return sub ? sub.addSeparator() : null;
+        }
+      };
+    }
+    var STORE = "__linkerMenuSections";
+    function sharedSection2(menu, key, label, icon) {
+      if (!supportsSubmenu())
+        return menuSection2(menu, label, true);
+      let store = menu[STORE];
+      if (!store) {
+        store = {};
+        try {
+          Object.defineProperty(menu, STORE, { value: store, enumerable: false, configurable: true });
+        } catch (e) {
+          return menuSection2(menu, label, true, icon);
+        }
+      }
+      if (!store[key]) {
+        menu.addItem((item) => {
+          item.setTitle(label);
+          if (icon)
+            item.setIcon(icon);
+          store[key] = item.setSubmenu();
+        });
+      }
+      return store[key];
+    }
+    module2.exports = { menuSection: menuSection2, sharedSection: sharedSection2, supportsSubmenu };
+  }
+});
+
+// src/shared/discover.js
+var require_discover = __commonJS({
+  "src/shared/discover.js"(exports2, module2) {
+    "use strict";
+    var LINKER_API = 1;
+    function discoverLinkers(app, opts) {
+      const minVersion = opts && opts.minVersion || LINKER_API;
+      const found = [];
+      const plugins = app && app.plugins && app.plugins.plugins;
+      if (!plugins)
+        return found;
+      for (const id of Object.keys(plugins)) {
+        const plugin = plugins[id];
+        const provider = plugin && plugin.api && plugin.api.linker;
+        if (!provider || typeof provider.id !== "string")
+          continue;
+        if (!(provider.apiVersion >= minVersion))
+          continue;
+        found.push(provider);
+      }
+      return found;
+    }
+    function outranks(a, b) {
+      if (a.precedence !== b.precedence)
+        return (a.precedence || 0) > (b.precedence || 0);
+      return String(a.id) < String(b.id);
+    }
+    function foreignRanges(app, self, text) {
+      const ranges = [];
+      for (const peer of discoverLinkers(app)) {
+        if (peer.id === self.id || !outranks(peer, self))
+          continue;
+        if (typeof peer.matches !== "function")
+          continue;
+        let matches;
+        try {
+          matches = peer.matches(text) || [];
+        } catch (e) {
+          matches = [];
+        }
+        for (const m of matches) {
+          if (m && typeof m.start === "number" && typeof m.end === "number")
+            ranges.push([m.start, m.end]);
+        }
+      }
+      return ranges.sort((a, b) => a[0] - b[0]);
+    }
+    function overlaps(ranges, s, e) {
+      for (const [rs, re] of ranges) {
+        if (rs >= e)
+          break;
+        if (re > s)
+          return true;
+      }
+      return false;
+    }
+    function ownedMatches(app, self, text, matches) {
+      if (!matches.length)
+        return matches;
+      const foreign = foreignRanges(app, self, text);
+      if (!foreign.length)
+        return matches;
+      return matches.filter((m) => !overlaps(foreign, m.start, m.end));
+    }
+    function yieldedCandidates(app, self, text) {
+      const out = [];
+      for (const peer of discoverLinkers(app)) {
+        if (peer.id === self.id || outranks(peer, self))
+          continue;
+        if (typeof peer.matches !== "function")
+          continue;
+        let matches;
+        try {
+          matches = peer.matches(text) || [];
+        } catch (e) {
+          matches = [];
+        }
+        for (const m of matches) {
+          if (!m || typeof m.start !== "number" || typeof m.end !== "number")
+            continue;
+          out.push({
+            start: m.start,
+            end: m.end,
+            label: m.label || m.target || "",
+            target: m.target,
+            // The peer's id travels with the candidate so it can survive a round trip through a
+            // DOM attribute — the editor decoration carries candidates as data, and the opener
+            // is looked up again at click time.
+            id: peer.id,
+            source: peer.displayName || peer.id,
+            open: (sourcePath, newTab) => {
+              if (typeof peer.open === "function")
+                peer.open(m.target, sourcePath, newTab);
+            }
+          });
+        }
+      }
+      return out;
+    }
+    function candidatesFor(candidates, s, e) {
+      return candidates.filter((c) => c.start < e && c.end > s);
+    }
+    function peersOffering2(app, self, kind, text) {
+      const out = [];
+      for (const peer of discoverLinkers(app)) {
+        if (peer.id === self.id || typeof peer.offers !== "function")
+          continue;
+        let yes;
+        try {
+          yes = peer.offers(kind, text);
+        } catch (e) {
+          yes = false;
+        }
+        if (yes)
+          out.push(peer);
+      }
+      return out;
+    }
+    function siblingLinkers(app, self) {
+      return discoverLinkers(app).filter((p) => p.id !== self.id);
+    }
+    module2.exports = { LINKER_API, discoverLinkers, outranks, foreignRanges, overlaps, ownedMatches, yieldedCandidates, candidatesFor, peersOffering: peersOffering2, siblingLinkers };
+  }
+});
+
+// src/shared/link-owner.js
+var require_link_owner = __commonJS({
+  "src/shared/link-owner.js"(exports2, module2) {
+    "use strict";
+    var { outranks, discoverLinkers } = require_discover();
+    var RANK = { binding: 2, index: 1 };
+    function linkOwner(app, self, target, title) {
+      let best = null;
+      let bestRank = 0;
+      for (const peer of discoverLinkers(app)) {
+        if (typeof peer.claim !== "function")
+          continue;
+        let claim;
+        try {
+          claim = peer.claim(target, title);
+        } catch (e) {
+          claim = null;
+        }
+        const rank = RANK[claim] || 0;
+        if (!rank)
+          continue;
+        if (rank > bestRank || rank === bestRank && best && outranks(peer, best)) {
+          best = peer;
+          bestRank = rank;
+        }
+      }
+      return best;
+    }
+    function ownsLink2(app, self, target, title) {
+      const owner = linkOwner(app, self, target, title);
+      return !!owner && owner.id === self.id;
+    }
+    module2.exports = { linkOwner, ownsLink: ownsLink2, RANK };
   }
 });
 
@@ -1094,7 +1344,7 @@ var require_i18n = __commonJS({
 var require_embed = __commonJS({
   "src/embed.js"(exports2, module2) {
     "use strict";
-    var { MarkdownRenderChild, Menu: Menu2, Notice: Notice2 } = require("obsidian");
+    var { MarkdownRenderChild, Menu, Notice: Notice2 } = require("obsidian");
     var nodePath2 = require("path");
     var { readLines, renderCode } = require_render();
     var { parseBinding: parseBinding2 } = require_binding();
@@ -1246,7 +1496,7 @@ var require_embed = __commonJS({
           return;
         evt.preventDefault();
         evt.stopPropagation();
-        const menu = new Menu2();
+        const menu = new Menu();
         if (res.entry)
           menu.addItem((i) => i.setTitle(t2("embed.menu.open")).setIcon("go-to-file").onClick(() => this.open()));
         menu.addItem((i) => i.setTitle(t2("embed.menu.refresh")).setIcon("refresh-cw").onClick(() => this.render(true)));
@@ -2005,6 +2255,82 @@ var require_folder_list = __commonJS({
   }
 });
 
+// src/shared/precedence.js
+var require_precedence = __commonJS({
+  "src/shared/precedence.js"(exports2, module2) {
+    "use strict";
+    var { discoverLinkers, outranks, siblingLinkers } = require_discover();
+    var STEP = 10;
+    function rankedLinkers(app) {
+      return discoverLinkers(app).slice().sort((a, b) => {
+        if (outranks(a, b))
+          return -1;
+        if (outranks(b, a))
+          return 1;
+        return 0;
+      });
+    }
+    function precedenceForIndex(app, self, index) {
+      const others = rankedLinkers(app).filter((p) => p.id !== self.id);
+      if (!others.length)
+        return self.precedence || 0;
+      const at = Math.max(0, Math.min(index, others.length));
+      const above = at > 0 ? others[at - 1].precedence || 0 : null;
+      const below = at < others.length ? others[at].precedence || 0 : null;
+      if (above === null)
+        return below + STEP;
+      if (below === null)
+        return above - STEP;
+      return (above + below) / 2;
+    }
+    function currentIndex(app, self) {
+      return rankedLinkers(app).findIndex((p) => p.id === self.id);
+    }
+    function renderPrecedence(containerEl, opts) {
+      const { app, provider, Setting, name, desc, save } = opts;
+      if (!provider || !siblingLinkers(app, provider).length)
+        return;
+      new Setting(containerEl).setName(name).setDesc(desc);
+      const cls = opts.cls || "linker";
+      const list = containerEl.createDiv({ cls: `${cls}-precedence-list` });
+      const draw = () => {
+        list.empty();
+        const ranked = rankedLinkers(app);
+        ranked.forEach((p, i) => {
+          const mine = p.id === provider.id;
+          const row = new Setting(list).setName(`${i + 1}. ${p.displayName || p.id}`);
+          if (!mine) {
+            row.setDesc(opts.otherDesc || "");
+            return;
+          }
+          row.settingEl.addClass(`${cls}-precedence-self`);
+          row.addExtraButton((b) => b.setIcon("arrow-up").setTooltip(opts.upTooltip || "").setDisabled(i === 0).onClick(async () => {
+            await save(precedenceForIndex(app, provider, i - 1));
+            refresh();
+          }));
+          row.addExtraButton((b) => b.setIcon("arrow-down").setTooltip(opts.downTooltip || "").setDisabled(i === ranked.length - 1).onClick(async () => {
+            await save(precedenceForIndex(app, provider, i + 1));
+            refresh();
+          }));
+        });
+      };
+      const refresh = () => {
+        for (const p of siblingLinkers(app, provider)) {
+          if (typeof p.refresh === "function") {
+            try {
+              p.refresh();
+            } catch (e) {
+            }
+          }
+        }
+        draw();
+      };
+      draw();
+    }
+    module2.exports = { STEP, rankedLinkers, precedenceForIndex, currentIndex, renderPrecedence };
+  }
+});
+
 // src/settings-tab.js
 var require_settings_tab = __commonJS({
   "src/settings-tab.js"(exports2, module2) {
@@ -2014,6 +2340,7 @@ var require_settings_tab = __commonJS({
     var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest();
     var { renderFolderList } = require_folder_list();
     var { t: t2, plural: plural2 } = require_i18n();
+    var { renderPrecedence: precedenceSetting } = require_precedence();
     var normFolder = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "").trim();
     var CodeLinkerSettingTab2 = class extends PluginSettingTab {
       constructor(app, plugin) {
@@ -2362,6 +2689,21 @@ var require_settings_tab = __commonJS({
           await save(false);
         }));
         new Setting(containerEl).setName(t2("set.heading.maintenance")).setHeading();
+        precedenceSetting(containerEl, {
+          app: this.app,
+          provider: this.plugin.api && this.plugin.api.linker,
+          Setting,
+          cls: "code",
+          name: t2("set.precedence.name"),
+          desc: t2("set.precedence.desc"),
+          otherDesc: t2("set.precedence.other"),
+          upTooltip: t2("set.precedence.up"),
+          downTooltip: t2("set.precedence.down"),
+          save: async (value) => {
+            s.linkPrecedence = value;
+            await save(false);
+          }
+        });
         new Setting(containerEl).setName(t2("set.rebuild.name")).setDesc(t2("set.rebuild.desc")).addButton((b) => b.setButtonText(t2("set.rebuild.button")).onClick(() => this.plugin.rebuildIndex(true).then(() => this.display())));
       }
     };
@@ -2373,9 +2715,14 @@ var require_settings_tab = __commonJS({
 var require_api = __commonJS({
   "src/api.js"(exports2, module2) {
     "use strict";
+    var { LINKER_API } = require_discover();
+    var { splitTarget: splitTarget2 } = require_markdown();
+    var { bindingOwner: bindingOwner2, ownsBinding } = require_binding();
+    var OWNER2 = "code";
     var pick = (e) => ({ name: e.name, kind: e.kind, lang: e.lang, path: e.path, line: e.line });
     module2.exports = {
       buildApi() {
+        const plugin = this;
         return {
           version: this.manifest.version,
           codeRoot: () => this.codeRoot(),
@@ -2393,7 +2740,38 @@ var require_api = __commonJS({
           linkFor: (entry) => this.buildLink(entry),
           uriFor: (entry) => this.fillRoot(this.buildUri(entry)),
           // Subscribe to index rebuilds; returns an unsubscribe function.
-          onChange: (cb) => this.onIndexChange(cb)
+          onChange: (cb) => this.onIndexChange(cb),
+          // What the sibling linker plugins read. See shared/discover.js and shared/link-owner.js.
+          linker: {
+            apiVersion: LINKER_API,
+            id: "code-linker",
+            displayName: "Code Linker",
+            // The sigil half of the family: we resolve an explicit reference rather than
+            // matching bare words, so we never contest a prose span.
+            kind: "sigil",
+            get precedence() {
+              return plugin.settings.linkPrecedence;
+            },
+            // How strongly this link is ours. A binding anchor is the author's own word and
+            // settles it; landing in our index is a weaker claim that the reference linker can
+            // make about the same file whenever the two roots overlap.
+            claim: (target, title) => {
+              const split = splitTarget2(String(target || ""));
+              const ttl = title ? String(title) : split.title;
+              if (ownsBinding(ttl, OWNER2))
+                return "binding";
+              if (bindingOwner2(ttl))
+                return null;
+              return split.url && plugin.targetIndexedFile(plugin.decodeTarget(split.url)) ? "index" : null;
+            },
+            // Whether we'd add a menu entry of this kind, asked before either plugin writes one
+            // so the pair can share a submenu instead of doubling up.
+            //
+            // Both selection actions search on click rather than filtering the menu by what the
+            // index holds, so the answer doesn't depend on the text — only on whether our
+            // context menu is switched on at all.
+            offers: (kind) => (kind === "convert" || kind === "open") && !!plugin.settings.contextMenu
+          }
         };
       },
       apiFiles() {
@@ -2464,6 +2842,16 @@ var require_en = __commonJS({
       "cmd.updateLinksVault": "Update code links in the whole vault",
       // Editor context menu
       "menu.convert": "Find and convert to link",
+      // Selection actions. `.solo` is the flat wording used when no sibling linker offers the
+      // same verb; `.group` labels the shared submenu when one does, and `.item` names our
+      // destination inside it. The `.group` wording must match the sibling's word for word —
+      // whichever plugin is called first creates the group and its label is the one shown.
+      "menu.convert.solo": "Find and convert to code link",
+      "menu.convert.group": "Find and convert to link",
+      "menu.convert.item": "Code",
+      "menu.open.solo": "Find and open code",
+      "menu.open.group": "Find and open",
+      "menu.open.item": "Code",
       "menu.copyLink": "Copy code link",
       "menu.fixLink": "Update this code link",
       "menu.pin": "Pin this code link",
@@ -2626,7 +3014,12 @@ var require_en = __commonJS({
       "set.info": "Code root: {root} \xB7 {entries} indexed",
       "set.info.unknownRoot": "(unknown)",
       // Plural noun phrases
-      "plural.entry": { one: "{n} entry", other: "{n} entries" }
+      "plural.entry": { one: "{n} entry", other: "{n} entries" },
+      "set.precedence.name": "Priority among linker plugins",
+      "set.precedence.desc": "When two linkers claim the same word or the same link, the one higher in this list wins and the other steps aside. Only this plugin\u2019s own position can be moved from here \u2014 move the others from their own settings.",
+      "set.precedence.other": "Move from that plugin\u2019s own settings",
+      "set.precedence.up": "Move up",
+      "set.precedence.down": "Move down"
     };
   }
 });
@@ -2656,6 +3049,12 @@ var require_ru = __commonJS({
       "cmd.updateLinksVault": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u043A\u043E\u0434 \u0432\u043E \u0432\u0441\u0451\u043C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
       // Editor context menu
       "menu.convert": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
+      "menu.convert.solo": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
+      "menu.convert.group": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
+      "menu.convert.item": "\u041A\u043E\u0434",
+      "menu.open.solo": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434",
+      "menu.open.group": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C",
+      "menu.open.item": "\u041A\u043E\u0434",
       "menu.copyLink": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
       "menu.fixLink": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
       "menu.pin": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443",
@@ -2818,13 +3217,18 @@ var require_ru = __commonJS({
       "set.info": "\u041A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430: {root} \xB7 \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
       "set.info.unknownRoot": "(\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E)",
       // Plural noun phrases
-      "plural.entry": { one: "{n} \u0437\u0430\u043F\u0438\u0441\u044C", few: "{n} \u0437\u0430\u043F\u0438\u0441\u0438", many: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439", other: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439" }
+      "plural.entry": { one: "{n} \u0437\u0430\u043F\u0438\u0441\u044C", few: "{n} \u0437\u0430\u043F\u0438\u0441\u0438", many: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439", other: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439" },
+      "set.precedence.name": "\u041F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442 \u0441\u0440\u0435\u0434\u0438 \u043F\u043B\u0430\u0433\u0438\u043D\u043E\u0432-\u043B\u0438\u043D\u043A\u0435\u0440\u043E\u0432",
+      "set.precedence.desc": "\u041A\u043E\u0433\u0434\u0430 \u0434\u0432\u0430 \u043B\u0438\u043D\u043A\u0435\u0440\u0430 \u043F\u0440\u0435\u0442\u0435\u043D\u0434\u0443\u044E\u0442 \u043D\u0430 \u043E\u0434\u043D\u043E \u0441\u043B\u043E\u0432\u043E \u0438\u043B\u0438 \u043E\u0434\u043D\u0443 \u0441\u0441\u044B\u043B\u043A\u0443, \u0432\u044B\u0438\u0433\u0440\u044B\u0432\u0430\u0435\u0442 \u0442\u043E\u0442, \u043A\u0442\u043E \u0432\u044B\u0448\u0435 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435, \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0443\u0441\u0442\u0443\u043F\u0430\u044E\u0442. \u041E\u0442\u0441\u044E\u0434\u0430 \u043C\u043E\u0436\u043D\u043E \u0434\u0432\u0438\u0433\u0430\u0442\u044C \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u043E\u0442 \u043F\u043B\u0430\u0433\u0438\u043D \u2014 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0438\u0437 \u0438\u0445 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u044B\u0445 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A.",
+      "set.precedence.other": "\u041F\u0435\u0440\u0435\u043C\u0435\u0441\u0442\u0438\u0442\u044C \u0438\u0437 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A \u0442\u043E\u0433\u043E \u043F\u043B\u0430\u0433\u0438\u043D\u0430",
+      "set.precedence.up": "\u0412\u044B\u0448\u0435",
+      "set.precedence.down": "\u041D\u0438\u0436\u0435"
     };
   }
 });
 
 // src/main.js
-var { Plugin, Notice, normalizePath, MarkdownView, Menu } = require("obsidian");
+var { Plugin, Notice, normalizePath, MarkdownView } = require("obsidian");
 var { EditorView } = require("@codemirror/view");
 var { Prec } = require("@codemirror/state");
 var fs = require("fs");
@@ -2835,6 +3239,9 @@ var { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPL
 var { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require_markdown();
 var { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require_binding();
 var { fillRoot: fillRootToken, ownsRootToken } = require_root_token();
+var { menuSection, sharedSection } = require_menu();
+var { peersOffering } = require_discover();
+var { ownsLink } = require_link_owner();
 var { resolveGit, resolveGitDir } = require_git();
 var OWNER = "code";
 var SIBLING_ID = "reference-linker";
@@ -2869,7 +3276,6 @@ var CodeLinkerPlugin = class extends Plugin {
     this.migrateSettings();
     this.initPresetVisibility();
     await this.loadCache();
-    this.api = this.buildApi();
     this.hover = new HoverPreview(this);
     this.registerEditorSuggest(new CodeIndexSuggest(this.app, this));
     this.registerMarkdownPostProcessor((el) => this.resolveRootLinks(el));
@@ -2938,13 +3344,13 @@ var CodeLinkerPlugin = class extends Plugin {
         if (!this.settings.contextMenu)
           return;
         if (this.selectionTarget(editor, true)) {
-          menu.addItem((item) => item.setTitle(t("menu.convert")).setIcon("link").onClick(() => this.convertSelection(editor)));
+          this.selectionItem(menu, "convert", "link", () => this.convertSelection(editor));
         }
         if (this.selectionTarget(editor, false)) {
-          menu.addItem((item) => item.setTitle(t("cmd.openSelection")).setIcon("file-search").onClick(() => this.openSelection(editor)));
+          this.selectionItem(menu, "open", "file-search", () => this.openSelection(editor));
         }
         const link = this.codeLinkAtCursor(editor);
-        if (link && this.isCodeLink(link.target)) {
+        if (link && this.ownsLinkAtCursor(link)) {
           menu.addItem((item) => item.setTitle(t("menu.copyLink")).setIcon("copy").onClick(() => this.copyLinkAtCursor(link)));
           if (this.isLinkStale(link.target)) {
             menu.addItem((item) => item.setTitle(t("menu.fixLink")).setIcon("wrench").onClick(() => this.fixLinkAtCursor(editor, link)));
@@ -2965,6 +3371,7 @@ var CodeLinkerPlugin = class extends Plugin {
       })
     );
     this.app.workspace.onLayoutReady(() => this.rebuildIndex(false));
+    this.api = this.buildApi();
   }
   onunload() {
     this.stopWatchers();
@@ -4229,39 +4636,38 @@ var CodeLinkerPlugin = class extends Plugin {
     const out = "[" + link.name + "](" + withTitle(url, title) + ")";
     editor.replaceRange(out, { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
   }
-  // setSubmenu landed after the manifest's minAppVersion, so ask a throwaway menu rather
-  // than assume: on older builds the pins fall back to flat items instead of vanishing.
-  submenuSupported() {
-    if (this._submenu == null) {
-      this._submenu = false;
-      try {
-        new Menu().addItem((i) => {
-          this._submenu = typeof i.setSubmenu === "function";
-        });
-      } catch (e) {
-      }
-    }
-    return this._submenu;
+  // One of the two selection verbs, nested under the verb itself when the reference linker
+  // will offer the same one. Whether to nest has to be settled before anything is written:
+  // an item already in Obsidian's menu can't be pulled back out and reparented, so we ask
+  // the sibling first rather than discovering the clash afterwards.
+  selectionItem(menu, kind, icon, run) {
+    const provider = this.api && this.api.linker;
+    const shared = !!provider && peersOffering(this.app, provider, kind).length > 0;
+    const where = shared ? sharedSection(menu, "linker:" + kind, t("menu." + kind + ".group"), icon) : menu;
+    where.addItem((item) => item.setTitle(t(shared ? "menu." + kind + ".item" : "menu." + kind + ".solo")).setIcon(icon).onClick(run));
+  }
+  // Whether the link under the cursor is ours to act on. Recognising it isn't enough: the
+  // reference linker recognises a file both indexes cover just as readily, and two Copy and
+  // two Unpin items on one link tell the reader nothing about which is which.
+  ownsLinkAtCursor(link) {
+    if (!this.isCodeLink(link.target))
+      return false;
+    const provider = this.api && this.api.linker;
+    if (!provider)
+      return true;
+    return ownsLink(this.app, provider, link.target);
   }
   // The pins, in a submenu: they're a set, and they'd crowd the menu otherwise. Each is
   // labelled with what it would pin to — "symbol" and "kind" mean nothing until you see
-  // Player and class.
+  // Player and class. menuSection handles the older builds where submenus don't exist.
   addPinItems(menu, option, run) {
     const opts = ["sym", "kind", "line"].map((a) => [a, option(a)]).filter(([, o]) => o);
     if (!opts.length)
       return;
-    const add = (m, a, o) => m.addItem((i) => i.setTitle(t("menu.pin." + a, { value: o.value })).setIcon("pin").onClick(() => run(a)));
-    if (!this.submenuSupported()) {
-      for (const [a, o] of opts)
-        add(menu, a, o);
-      return;
+    const group = menuSection(menu, t("menu.pin"), true);
+    for (const [a, o] of opts) {
+      group.addItem((i) => i.setTitle(t("menu.pin." + a, { value: o.value })).setIcon("pin").onClick(() => run(a)));
     }
-    menu.addItem((item) => {
-      item.setTitle(t("menu.pin")).setIcon("pin");
-      const sub = item.setSubmenu();
-      for (const [a, o] of opts)
-        add(sub, a, o);
-    });
   }
   // A right-click item on the code link under the cursor, mirrored into the palette so
   // every one of them is reachable without the mouse. `can` gates both.
@@ -4271,7 +4677,7 @@ var CodeLinkerPlugin = class extends Plugin {
       name,
       editorCheckCallback: (checking, editor) => {
         const link = this.codeLinkAtCursor(editor);
-        if (!link || !this.isCodeLink(link.target) || !can(link))
+        if (!link || !this.ownsLinkAtCursor(link) || !can(link))
           return false;
         if (!checking)
           run(editor, link);

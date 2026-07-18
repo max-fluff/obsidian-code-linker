@@ -70,6 +70,10 @@ const DEFAULT_SETTINGS = {
   maxResults: 12,
   maxFileSizeKb: 2048, // 0 = no limit; larger files are indexed by name only, not parsed
   contextMenu: true, // the "Convert"/"Find and open" items in the editor right-click menu
+  // Breaks a tie when a link lands in both our index and the reference linker's and carries
+  // no binding to say whose it is. A binding always decides on its own, so this only ever
+  // settles the genuinely ambiguous case.
+  linkPrecedence: 20,
 };
 
 // Split the skip list into two matchers: bare names (skipped at any depth) and

@@ -4,11 +4,18 @@
 // DataviewJS can read the code index. Mixed into the plugin prototype; methods
 // run with the plugin as `this`.
 
+const { LINKER_API } = require('./shared/discover');
+const { splitTarget } = require('./shared/markdown');
+const { bindingOwner, ownsBinding } = require('./shared/binding');
+
+const OWNER = 'code';
+
 // A plain copy of an index entry, so a consumer can't mutate our live index.
 const pick = (e) => ({ name: e.name, kind: e.kind, lang: e.lang, path: e.path, line: e.line });
 
 module.exports = {
   buildApi() {
+    const plugin = this;
     return {
       version: this.manifest.version,
       codeRoot: () => this.codeRoot(),
@@ -34,6 +41,38 @@ module.exports = {
 
       // Subscribe to index rebuilds; returns an unsubscribe function.
       onChange: (cb) => this.onIndexChange(cb),
+
+      // What the sibling linker plugins read. See shared/discover.js and shared/link-owner.js.
+      linker: {
+        apiVersion: LINKER_API,
+        id: 'code-linker',
+        displayName: 'Code Linker',
+        // The sigil half of the family: we resolve an explicit reference rather than
+        // matching bare words, so we never contest a prose span.
+        kind: 'sigil',
+        get precedence() { return plugin.settings.linkPrecedence; },
+
+        // How strongly this link is ours. A binding anchor is the author's own word and
+        // settles it; landing in our index is a weaker claim that the reference linker can
+        // make about the same file whenever the two roots overlap.
+        claim: (target, title) => {
+          const split = splitTarget(String(target || ''));
+          const ttl = title ? String(title) : split.title;
+          if (ownsBinding(ttl, OWNER)) return 'binding';
+          // Somebody else's anchor. Our index may well contain the file, but the author
+          // already said what this link is, and it isn't a code link.
+          if (bindingOwner(ttl)) return null;
+          return split.url && plugin.targetIndexedFile(plugin.decodeTarget(split.url)) ? 'index' : null;
+        },
+
+        // Whether we'd add a menu entry of this kind, asked before either plugin writes one
+        // so the pair can share a submenu instead of doubling up.
+        //
+        // Both selection actions search on click rather than filtering the menu by what the
+        // index holds, so the answer doesn't depend on the text — only on whether our
+        // context menu is switched on at all.
+        offers: (kind) => (kind === 'convert' || kind === 'open') && !!plugin.settings.contextMenu,
+      },
     };
   },
 

@@ -7,7 +7,7 @@
 // The plugin scans the configured folders itself (Node fs, desktop only) and
 // keeps the index in memory — no external build step or index file.
 
-const { Plugin, Notice, normalizePath, MarkdownView, Menu } = require('obsidian');
+const { Plugin, Notice, normalizePath, MarkdownView } = require('obsidian');
 const { EditorView } = require('@codemirror/view');
 const { Prec } = require('@codemirror/state');
 const fs = require('fs');
@@ -19,6 +19,9 @@ const { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEM
 const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
 const { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require('./shared/binding');
 const { fillRoot: fillRootToken, ownsRootToken } = require('./shared/root-token');
+const { menuSection, sharedSection } = require('./shared/menu');
+const { peersOffering } = require('./shared/discover');
+const { ownsLink } = require('./shared/link-owner');
 const { resolveGit, resolveGitDir } = require('./git');
 
 // Which root token and which bindings are this plugin's, as the shared modules name them.
@@ -66,7 +69,6 @@ class CodeLinkerPlugin extends Plugin {
     this.migrateSettings();
     this.initPresetVisibility();
     await this.loadCache();
-    this.api = this.buildApi(); // app.plugins.plugins['code-linker'].api
     this.hover = new HoverPreview(this);
 
     this.registerEditorSuggest(new CodeIndexSuggest(this.app, this));
@@ -142,16 +144,23 @@ class CodeLinkerPlugin extends Plugin {
         if (!this.settings.contextMenu) return;
         // Convert writes a link, so it's offered only where that's safe (not in a link,
         // code, or frontmatter); open is read-only, so it's offered anywhere but a link.
+        //
+        // Both sigil linkers offer these two verbs on any word, so with the sibling installed
+        // the menu used to carry two near-identical lines per verb. Now the verb is the entry
+        // and each plugin names its own destination inside it — one "Find and open" with
+        // "Code" and "Document" under it, rather than two entries the reader has to tell
+        // apart. Alone, nothing is nested and the wording says which kind of link it makes.
         if (this.selectionTarget(editor, true)) {
-          menu.addItem((item) => item.setTitle(t('menu.convert')).setIcon('link').onClick(() => this.convertSelection(editor)));
+          this.selectionItem(menu, 'convert', 'link', () => this.convertSelection(editor));
         }
         if (this.selectionTarget(editor, false)) {
-          menu.addItem((item) => item.setTitle(t('cmd.openSelection')).setIcon('file-search').onClick(() => this.openSelection(editor)));
+          this.selectionItem(menu, 'open', 'file-search', () => this.openSelection(editor));
         }
         // Right-clicking one of our code links: copy its resolved target, and — if the
-        // stored line has drifted — offer to fix just that link.
+        // stored line has drifted — offer to fix just that link. Ownership is checked so a
+        // link the reference linker recognises too gets one set of actions, not two.
         const link = this.codeLinkAtCursor(editor);
-        if (link && this.isCodeLink(link.target)) {
+        if (link && this.ownsLinkAtCursor(link)) {
           menu.addItem((item) => item.setTitle(t('menu.copyLink')).setIcon('copy').onClick(() => this.copyLinkAtCursor(link)));
           if (this.isLinkStale(link.target)) {
             menu.addItem((item) => item.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fixLinkAtCursor(editor, link)));
@@ -177,6 +186,12 @@ class CodeLinkerPlugin extends Plugin {
     // The disk cache (loaded above) gives an instant index on startup; this
     // background rebuild validates it against the filesystem and refreshes.
     this.app.workspace.onLayoutReady(() => this.rebuildIndex(false));
+
+    // Published last, and deliberately so. app.plugins.plugins['code-linker'].api is how the
+    // reference linker finds us and decides a link we both recognise is ours — so a load that
+    // throws before this point leaves no provider behind, and the sibling keeps offering its
+    // own actions instead of standing down for a plugin that never came up.
+    this.api = this.buildApi();
   }
 
   onunload() {
@@ -1432,30 +1447,40 @@ class CodeLinkerPlugin extends Plugin {
     editor.replaceRange(out, { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
   }
 
-  // setSubmenu landed after the manifest's minAppVersion, so ask a throwaway menu rather
-  // than assume: on older builds the pins fall back to flat items instead of vanishing.
-  submenuSupported() {
-    if (this._submenu == null) {
-      this._submenu = false;
-      try { new Menu().addItem((i) => { this._submenu = typeof i.setSubmenu === 'function'; }); } catch { /* older API */ }
-    }
-    return this._submenu;
+  // One of the two selection verbs, nested under the verb itself when the reference linker
+  // will offer the same one. Whether to nest has to be settled before anything is written:
+  // an item already in Obsidian's menu can't be pulled back out and reparented, so we ask
+  // the sibling first rather than discovering the clash afterwards.
+  selectionItem(menu, kind, icon, run) {
+    const provider = this.api && this.api.linker;
+    const shared = !!provider && peersOffering(this.app, provider, kind).length > 0;
+    const where = shared ? sharedSection(menu, 'linker:' + kind, t('menu.' + kind + '.group'), icon) : menu;
+    where.addItem((item) => item
+      .setTitle(t(shared ? 'menu.' + kind + '.item' : 'menu.' + kind + '.solo'))
+      .setIcon(icon)
+      .onClick(run));
+  }
+
+  // Whether the link under the cursor is ours to act on. Recognising it isn't enough: the
+  // reference linker recognises a file both indexes cover just as readily, and two Copy and
+  // two Unpin items on one link tell the reader nothing about which is which.
+  ownsLinkAtCursor(link) {
+    if (!this.isCodeLink(link.target)) return false;
+    const provider = this.api && this.api.linker;
+    if (!provider) return true;
+    return ownsLink(this.app, provider, link.target);
   }
 
   // The pins, in a submenu: they're a set, and they'd crowd the menu otherwise. Each is
   // labelled with what it would pin to — "symbol" and "kind" mean nothing until you see
-  // Player and class.
+  // Player and class. menuSection handles the older builds where submenus don't exist.
   addPinItems(menu, option, run) {
     const opts = ['sym', 'kind', 'line'].map((a) => [a, option(a)]).filter(([, o]) => o);
     if (!opts.length) return;
-    const add = (m, a, o) => m.addItem((i) =>
-      i.setTitle(t('menu.pin.' + a, { value: o.value })).setIcon('pin').onClick(() => run(a)));
-    if (!this.submenuSupported()) { for (const [a, o] of opts) add(menu, a, o); return; }
-    menu.addItem((item) => {
-      item.setTitle(t('menu.pin')).setIcon('pin');
-      const sub = item.setSubmenu();
-      for (const [a, o] of opts) add(sub, a, o);
-    });
+    const group = menuSection(menu, t('menu.pin'), true);
+    for (const [a, o] of opts) {
+      group.addItem((i) => i.setTitle(t('menu.pin.' + a, { value: o.value })).setIcon('pin').onClick(() => run(a)));
+    }
   }
 
   // A right-click item on the code link under the cursor, mirrored into the palette so
@@ -1466,7 +1491,7 @@ class CodeLinkerPlugin extends Plugin {
       name,
       editorCheckCallback: (checking, editor) => {
         const link = this.codeLinkAtCursor(editor);
-        if (!link || !this.isCodeLink(link.target) || !can(link)) return false;
+        if (!link || !this.ownsLinkAtCursor(link) || !can(link)) return false;
         if (!checking) run(editor, link);
         return true;
       },
