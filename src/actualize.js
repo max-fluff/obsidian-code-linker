@@ -9,18 +9,20 @@
 // An unpinned one is left alone — never marked, never rewritten. Nothing is inferred from
 // the link's text, which is the reader's prose.
 
-const { Notice, MarkdownView } = require('obsidian');
-const { ViewPlugin, Decoration } = require('@codemirror/view');
-const { RangeSetBuilder, StateEffect } = require('@codemirror/state');
-const { syntaxTree } = require('@codemirror/language');
-const { linkRegex, splitTarget, withTitle, rewriteLinks, rewriteFences } = require('./shared/markdown');
-const { LINE_RE, parseBinding } = require('./shared/binding');
+const { splitTarget, withTitle, rewriteLinks, rewriteFences } = require('./shared/markdown');
+const { LINE_RE, parseBinding, ownsBinding } = require('./shared/binding');
+const shared = require('./shared/actualize');
+
+// Which bindings are this plugin's, as the shared module names them.
+const OWNER = 'code';
 const { parseSpec, setBindLine } = require('./embed');
-const { UpdatePreviewModal } = require('./modal');
+const preview = require('./shared/update-preview');
 const { t } = require('./shared/i18n');
 
-// CM6 syntax-node names for contexts where a link is example text, not a live link.
-const SKIP_NODE = /code|comment|frontmatter/i;
+// Prefix for the preview modal's own classes, kept per plugin so two installed linkers
+// never style each other's dialog.
+const PREVIEW_CLASS = 'code-linker-preview';
+
 const EMBED_LANG = 'code-link';
 
 // One pass over a note's links and embeds. `selected` null is a dry run: apply every fix to
@@ -84,63 +86,19 @@ const pinLinksInText = (anchors) => (plugin, text) => {
   return { text: embeds.text, count: links.count + embeds.count };
 };
 
-// A CM6 refresh signal, dispatched when the index changes so Live Preview re-scans stale
-// marks without waiting for the next edit or scroll.
-const refreshEffect = StateEffect.define();
-
-function refreshStaleLinks(app) {
-  app.workspace.iterateAllLeaves((leaf) => {
-    const cm = leaf.view && leaf.view.editor && leaf.view.editor.cm;
-    if (cm) cm.dispatch({ effects: refreshEffect.of(null) });
-  });
-}
-
-// Live Preview underline for drifted links. Links inside code are skipped via the syntax
-// tree — they're example text, so the commands won't touch them and marking them would
-// only mislead.
-function staleLinksExtension(plugin) {
-  const marks = {
-    stale: Decoration.mark({ class: 'code-linker-stale' }),
-    broken: Decoration.mark({ class: 'code-linker-broken' }),
-  };
-  const build = (view) => {
-    const builder = new RangeSetBuilder();
-    if (plugin.settings.markStaleLinks) {
-      const tree = syntaxTree(view.state);
-      for (const { from, to } of view.visibleRanges) {
-        const text = view.state.doc.sliceString(from, to);
-        const re = linkRegex();
-        let m;
-        while ((m = re.exec(text))) {
-          const start = from + m.index;
-          const end = start + m[0].length;
-          let inCodeNode = false;
-          tree.iterate({ from: start, to: end, enter: (n) => { if (SKIP_NODE.test(n.type.name)) inCodeNode = true; } });
-          const state = inCodeNode ? null : plugin.linkState(m[2]);
-          if (state) builder.add(start, end, marks[state]);
-        }
-      }
-    }
-    return builder.finish();
-  };
-  return ViewPlugin.fromClass(
-    class {
-      constructor(view) { this.decorations = build(view); }
-      update(u) {
-        const refresh = u.transactions.some((tr) => tr.effects.some((e) => e.is(refreshEffect)));
-        if (u.docChanged || u.viewportChanged || refresh) this.decorations = build(u.view);
-      }
-    },
-    { decorations: (v) => v.decorations }
-  );
-}
+const { refreshStaleLinks } = shared;
+const staleLinksExtension = (plugin) => shared.staleLinksExtension(plugin, { stale: 'code-linker-stale', broken: 'code-linker-broken' });
 
 // What a link's binding says about where it points, or null when there's nothing to
-// judge: no line, or no binding to judge it against.
+// judge: no line, or no binding of ours to judge it against.
+//
+// The ownership check is explicit rather than left to the anchor lookups downstream. A
+// document binding would find no symbol here and read as a link gone broken, which is how
+// two installed plugins ended up marking each other's links.
 function bindStateOf(plugin, target) {
   const { url, title } = splitTarget(target);
   const m = url && LINE_RE.exec(url);
-  const b = parseBinding(title);
+  const b = ownsBinding(title, OWNER) ? parseBinding(title) : null;
   return m && b ? plugin.urlBindState(url, b, parseInt(m[1], 10)) : null;
 }
 
@@ -166,95 +124,11 @@ const methods = {
     return withTitle(r.url != null ? r.url : url.replace(LINE_RE, ':' + r.line), title);
   },
 
-  // An open editor keeps cursor and undo; in reading view there's none, so the active
-  // file is rewritten through the vault.
-  async rewriteActiveNote(transform, noticeKey) {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    const editor = view && view.editor;
-    if (editor) {
-      const { text, count } = transform(this, editor.getValue());
-      if (count) { const cur = editor.getCursor(); editor.setValue(text); editor.setCursor(cur); }
-      new Notice(t(noticeKey, { n: count }));
-      return;
-    }
-    const file = this.app.workspace.getActiveFile();
-    if (!file) { new Notice(t(noticeKey, { n: 0 })); return; }
-    const { text, count } = transform(this, await this.app.vault.read(file));
-    if (count) await this.app.vault.modify(file, text);
-    new Notice(t(noticeKey, { n: count }));
-  },
+  rewriteActiveNote(transform, noticeKey) { return shared.rewriteActiveNote(this, transform, noticeKey); },
+  rewriteVault(transform, noticeKey) { return shared.rewriteVault(this, transform, noticeKey); },
 
-  async rewriteVault(transform, noticeKey) {
-    let files = 0, total = 0;
-    for (const f of this.app.vault.getMarkdownFiles()) {
-      const { text, count } = transform(this, await this.app.vault.read(f));
-      if (count) { await this.app.vault.modify(f, text); files++; total += count; }
-    }
-    new Notice(t(noticeKey, { n: total, files }));
-  },
-
-  // Both update commands preview first: an open editor is previewed and written through the
-  // editor (cursor and undo survive), everything else through the vault.
-  async updateLinksInActiveNote() {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    const editor = view && view.editor;
-    const file = this.app.workspace.getActiveFile();
-    if (editor) {
-      const original = editor.getValue();
-      const c = rewriteUpdates(this, original, null);
-      this.openUpdatePreview([{ editor, label: (file && file.path) || t('label.thisNote'), original, changes: c.changes, broken: c.broken }]);
-      return;
-    }
-    if (!file) { new Notice(t('notice.linksUpdated', { n: 0 })); return; }
-    const original = await this.app.vault.read(file);
-    const c = rewriteUpdates(this, original, null);
-    this.openUpdatePreview([{ file, label: file.path, original, changes: c.changes, broken: c.broken }]);
-  },
-
-  async updateLinksInVault() {
-    const entries = [];
-    for (const f of this.app.vault.getMarkdownFiles()) {
-      const original = await this.app.vault.read(f);
-      const c = rewriteUpdates(this, original, null);
-      if (c.changes.length || c.broken.length) entries.push({ file: f, label: f.path, original, changes: c.changes, broken: c.broken });
-    }
-    this.openUpdatePreview(entries);
-  },
-
-  openUpdatePreview(entries) {
-    new UpdatePreviewModal(this.app, entries, (chosen) => this.applyUpdates(chosen)).open();
-  },
-
-  // Apply the changes the user kept, note by note: each note is rebuilt from just its
-  // selected keys and written under a guard, so a note edited since the preview is skipped,
-  // not clobbered. process reads and writes as one, so the guard can't race.
-  async applyUpdates(entries) {
-    let files = 0, total = 0, skipped = 0;
-    for (const e of entries) {
-      const keys = new Set(e.changes.filter((c) => c.selected).map((c) => c.key));
-      if (!keys.size) continue;
-      if (e.editor) {
-        if (e.editor.getValue() !== e.original) { skipped++; continue; }
-        const { newText, count } = rewriteUpdates(this, e.original, keys);
-        const cur = e.editor.getCursor();
-        e.editor.setValue(newText);
-        e.editor.setCursor(cur);
-        files++; total += count;
-      } else {
-        let count = 0;
-        await this.app.vault.process(e.file, (data) => {
-          if (data !== e.original) return data;
-          const out = rewriteUpdates(this, data, keys);
-          count = out.count;
-          return out.newText;
-        });
-        if (count) { files++; total += count; } else skipped++;
-      }
-    }
-    let msg = t('notice.linksUpdatedVault', { n: total, files });
-    if (skipped) msg += ' ' + t('notice.updateSkipped', { n: skipped });
-    new Notice(msg);
-  },
+  updateLinksInActiveNote() { return preview.updateInActiveNote(this, rewriteUpdates, PREVIEW_CLASS); },
+  updateLinksInVault() { return preview.updateInVault(this, rewriteUpdates, PREVIEW_CLASS); },
 
   pinLinksInActiveNote(anchors) { return this.rewriteActiveNote(pinLinksInText(anchors), 'notice.linksPinned'); },
   pinLinksInVault(anchors) { return this.rewriteVault(pinLinksInText(anchors), 'notice.linksPinnedVault'); },

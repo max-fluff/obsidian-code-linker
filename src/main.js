@@ -17,8 +17,15 @@ const nodePath = require('path');
 
 const { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, parseSkip, underSkip, pathInTarget } = require('./constants');
 const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
-const { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom } = require('./shared/binding');
+const { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require('./shared/binding');
+const { fillRoot: fillRootToken, ownsRootToken } = require('./shared/root-token');
 const { resolveGit, resolveGitDir } = require('./git');
+
+// Which root token and which bindings are this plugin's, as the shared modules name them.
+const OWNER = 'code';
+// The other sigil linker. Its presence is what turns a bare {root} from "obviously ours"
+// into a question, so it's worth asking about rather than assuming.
+const SIBLING_ID = 'reference-linker';
 
 // Templates whose {gitRemote}/{gitSha}/{gitBranch} resolve from the file's git repo.
 const GIT_PLACEHOLDER = /{(?:gitRemote|gitSha|gitBranch)}/;
@@ -198,19 +205,39 @@ class CodeLinkerPlugin extends Plugin {
     if (!known) editors.push({ name: 'Custom', template: tpl });
   }
 
-  // Obsidian URL-encodes the braces in a rendered href, so match both forms.
-  fillRoot(v) {
+  // Our own {code-root} is always ours to fill. A bare {root} predates the namespacing and
+  // Reference Linker used to fill it too, so it takes a verdict — see legacyRootIsOurs.
+  // The default claims it, which is what every call about our own links wants; only the
+  // render path, where another plugin's links go past, asks first.
+  fillRoot(v, claimLegacy = true) {
     const root = encodeURI(this.codeRoot().split(nodePath.sep).join('/'));
-    return v.replace(/\{root\}|%7Broot%7D/gi, root);
+    return fillRootToken(v, { owner: OWNER, root, claimLegacy });
+  }
+
+  siblingLinkerInstalled() {
+    const plugins = this.app.plugins && this.app.plugins.plugins;
+    return !!(plugins && plugins[SIBLING_ID]);
+  }
+
+  // Whether a bare {root} in a rendered link is ours to resolve. The binding settles it
+  // when there is one. Failing that, being the only linker installed makes every legacy
+  // link ours, which keeps a solo vault behaving exactly as it always did. Otherwise the
+  // link has to point at something inside our root to count as ours.
+  legacyRootIsOurs(url, title) {
+    const owner = bindingOwner(title);
+    if (owner) return owner === OWNER;
+    if (!this.siblingLinkerInstalled()) return true;
+    return !!this.targetIndexedFile(this.decodeTarget(url));
   }
 
   resolveRootLinks(el) {
     const links = el.querySelectorAll ? el.querySelectorAll('a') : [];
     for (const a of links) {
+      const title = a.getAttribute('title') || '';
       for (const attr of ['href', 'data-href']) {
         const v = a.getAttribute(attr);
         if (!v) continue;
-        const out = this.fillRoot(v);
+        const out = this.fillRoot(v, this.legacyRootIsOurs(v, title));
         if (out !== v) a.setAttribute(attr, out);
       }
     }
@@ -374,8 +401,10 @@ class CodeLinkerPlugin extends Plugin {
     return null;
   }
 
-  // The link under the click resolved, if it carries a {root} token (else null,
-  // so a plain link falls through to Obsidian's own opener).
+  // The link under the click resolved, if the token it carries is ours — else null, so a
+  // plain link falls through to Obsidian's own opener and the other linker's link falls
+  // through to that plugin. Both register a highest-precedence handler, so each has to
+  // claim only its own; otherwise the winner comes down to which plugin loaded first.
   rootUriAt(evt, view) {
     const el = evt.target;
     if (!el || !el.closest || !el.closest('.cm-link')) return null;
@@ -383,8 +412,9 @@ class CodeLinkerPlugin extends Plugin {
     if (!ref) return null;
     // The url alone: Live Preview reads the raw line, so without splitting the title off
     // it would travel into the opened URL and the editor would be handed a bad path.
-    const { url } = splitTarget(ref.target);
-    return /\{root\}|%7Broot%7D/i.test(url) ? this.fillRoot(url) : null;
+    const { url, title } = splitTarget(ref.target);
+    const claimLegacy = this.legacyRootIsOurs(url, title);
+    return ownsRootToken(url, OWNER, claimLegacy) ? this.fillRoot(url, claimLegacy) : null;
   }
 
   // Absolute base folder the scan paths are resolved against.

@@ -280,8 +280,21 @@ var require_constants = __commonJS({
 var require_binding = __commonJS({
   "src/shared/binding.js"(exports2, module2) {
     "use strict";
-    var TOKEN = /^(sym|kind|line):(.+)$/;
+    var ANCHORS = { sym: "sym", kind: "kind", sec: "sec", line: "hash" };
+    var TOKEN = /^(sym|kind|sec|line):(.+)$/;
+    var OWNERS = { code: ["sym", "kind", "hash"], reference: ["sec"] };
+    function ownerOf(binding) {
+      if (!binding)
+        return null;
+      const claimed = Object.keys(OWNERS).filter((owner) => OWNERS[owner].some((anchor) => binding[anchor]));
+      return claimed.length === 1 ? claimed[0] : null;
+    }
+    var bindingOwner2 = (title) => ownerOf(parseBinding2(title));
+    var ownsBinding = (title, owner) => bindingOwner2(title) === owner;
     var LINE_RE2 = /:(\d+)(?=\D*$)/;
+    var PAGE_RE = /#page=(\d+)/i;
+    var encodeValue = (v) => String(v).replace(/[%"()\s]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"));
+    var decodeValue = (v) => v.replace(/%([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
     function hashLine2(text) {
       let h = 2166136261;
       const s = String(text || "").trim();
@@ -295,34 +308,78 @@ var require_binding = __commonJS({
       const s = String(title || "").trim();
       if (!s)
         return null;
-      const b = { sym: "", kind: "", hash: "" };
+      const b = { sym: "", kind: "", sec: "", hash: "" };
       for (const word of s.split(/\s+/)) {
         const m = TOKEN.exec(word);
         if (!m)
           return null;
-        b[m[1] === "line" ? "hash" : m[1]] = m[2];
+        b[ANCHORS[m[1]]] = decodeValue(m[2]);
       }
-      return b.sym || b.kind || b.hash ? b : null;
+      return b.sym || b.kind || b.sec || b.hash ? b : null;
     }
     function formatBinding2(b) {
       const parts = [];
       if (b.sym)
-        parts.push("sym:" + b.sym);
+        parts.push("sym:" + encodeValue(b.sym));
       if (b.kind)
-        parts.push("kind:" + b.kind);
+        parts.push("kind:" + encodeValue(b.kind));
+      if (b.sec)
+        parts.push("sec:" + encodeValue(b.sec));
       if (b.hash)
         parts.push("line:" + b.hash);
       return parts.join(" ");
     }
-    function bindStateFrom2(hits, storedLine) {
-      if (hits.includes(storedLine))
+    function bindStateFrom2(hits, stored) {
+      if (hits.includes(stored))
         return null;
       if (!hits.length)
         return { state: "broken" };
-      const line = hits.reduce((a, n) => Math.abs(n - storedLine) < Math.abs(a - storedLine) ? n : a);
+      const line = hits.reduce((a, n) => Math.abs(n - stored) < Math.abs(a - stored) ? n : a);
       return { state: "stale", line };
     }
-    module2.exports = { LINE_RE: LINE_RE2, hashLine: hashLine2, parseBinding: parseBinding2, formatBinding: formatBinding2, bindStateFrom: bindStateFrom2 };
+    module2.exports = { LINE_RE: LINE_RE2, PAGE_RE, OWNERS, hashLine: hashLine2, parseBinding: parseBinding2, formatBinding: formatBinding2, bindStateFrom: bindStateFrom2, ownerOf, bindingOwner: bindingOwner2, ownsBinding };
+  }
+});
+
+// src/shared/root-token.js
+var require_root_token = __commonJS({
+  "src/shared/root-token.js"(exports2, module2) {
+    "use strict";
+    var OWNER_TOKENS = { code: "code-root", reference: "ref-root" };
+    var LEGACY_TOKEN = "root";
+    var tokenRe = (name) => new RegExp("\\{" + name + "\\}|%7B" + name + "%7D", "gi");
+    function rootTokenIn(url) {
+      const s = String(url == null ? "" : url);
+      for (const owner of Object.keys(OWNER_TOKENS)) {
+        if (tokenRe(OWNER_TOKENS[owner]).test(s))
+          return owner;
+      }
+      return tokenRe(LEGACY_TOKEN).test(s) ? "legacy" : null;
+    }
+    function ownsRootToken2(url, owner, claimLegacy) {
+      const found = rootTokenIn(url);
+      if (found === owner)
+        return true;
+      return found === "legacy" && !!claimLegacy;
+    }
+    function fillRoot(url, { owner, root, claimLegacy = false } = {}) {
+      const s = String(url == null ? "" : url);
+      if (!owner || !OWNER_TOKENS[owner])
+        return s;
+      let out = s.replace(tokenRe(OWNER_TOKENS[owner]), root);
+      if (claimLegacy)
+        out = out.replace(tokenRe(LEGACY_TOKEN), root);
+      return out;
+    }
+    function namespaceRoot(url, owner) {
+      const s = String(url == null ? "" : url);
+      if (!owner || !OWNER_TOKENS[owner])
+        return s;
+      if (rootTokenIn(s) !== "legacy")
+        return s;
+      return s.replace(tokenRe(LEGACY_TOKEN), "{" + OWNER_TOKENS[owner] + "}");
+    }
+    module2.exports = { OWNER_TOKENS, LEGACY_TOKEN, rootTokenIn, ownsRootToken: ownsRootToken2, fillRoot, namespaceRoot };
   }
 });
 
@@ -1305,6 +1362,406 @@ var require_embed = __commonJS({
   }
 });
 
+// src/shared/actualize.js
+var require_actualize = __commonJS({
+  "src/shared/actualize.js"(exports2, module2) {
+    "use strict";
+    var { Notice: Notice2, MarkdownView: MarkdownView2 } = require("obsidian");
+    var { ViewPlugin, Decoration } = require("@codemirror/view");
+    var { RangeSetBuilder, StateEffect } = require("@codemirror/state");
+    var { syntaxTree } = require("@codemirror/language");
+    var { linkRegex: linkRegex2 } = require_markdown();
+    var { t: t2 } = require_i18n();
+    var SKIP_NODE = /code|comment|frontmatter/i;
+    var refreshEffect = StateEffect.define();
+    function refreshStaleLinks(app) {
+      app.workspace.iterateAllLeaves((leaf) => {
+        const cm = leaf.view && leaf.view.editor && leaf.view.editor.cm;
+        if (cm)
+          cm.dispatch({ effects: refreshEffect.of(null) });
+      });
+    }
+    function staleLinksExtension(plugin, classes) {
+      const marks = {
+        stale: Decoration.mark({ class: classes.stale }),
+        broken: Decoration.mark({ class: classes.broken })
+      };
+      const build = (view) => {
+        const builder = new RangeSetBuilder();
+        if (plugin.settings.markStaleLinks) {
+          const tree = syntaxTree(view.state);
+          for (const { from, to } of view.visibleRanges) {
+            const text = view.state.doc.sliceString(from, to);
+            const re = linkRegex2();
+            let m;
+            while (m = re.exec(text)) {
+              const start = from + m.index;
+              const end = start + m[0].length;
+              let inCodeNode = false;
+              tree.iterate({ from: start, to: end, enter: (n) => {
+                if (SKIP_NODE.test(n.type.name))
+                  inCodeNode = true;
+              } });
+              const state = inCodeNode ? null : plugin.linkState(m[2]);
+              if (state)
+                builder.add(start, end, marks[state]);
+            }
+          }
+        }
+        return builder.finish();
+      };
+      return ViewPlugin.fromClass(
+        class {
+          constructor(view) {
+            this.decorations = build(view);
+          }
+          update(u) {
+            const refresh = u.transactions.some((tr) => tr.effects.some((e) => e.is(refreshEffect)));
+            if (u.docChanged || u.viewportChanged || refresh)
+              this.decorations = build(u.view);
+          }
+        },
+        { decorations: (v) => v.decorations }
+      );
+    }
+    async function rewriteActiveNote(plugin, transform, noticeKey) {
+      const view = plugin.app.workspace.getActiveViewOfType(MarkdownView2);
+      const editor = view && view.editor;
+      if (editor) {
+        const { text: text2, count: count2 } = transform(plugin, editor.getValue());
+        if (count2) {
+          const cur = editor.getCursor();
+          editor.setValue(text2);
+          editor.setCursor(cur);
+        }
+        new Notice2(t2(noticeKey, { n: count2 }));
+        return;
+      }
+      const file = plugin.app.workspace.getActiveFile();
+      if (!file) {
+        new Notice2(t2(noticeKey, { n: 0 }));
+        return;
+      }
+      const { text, count } = transform(plugin, await plugin.app.vault.read(file));
+      if (count)
+        await plugin.app.vault.modify(file, text);
+      new Notice2(t2(noticeKey, { n: count }));
+    }
+    async function rewriteVault(plugin, transform, noticeKey) {
+      let files = 0, total = 0;
+      for (const f of plugin.app.vault.getMarkdownFiles()) {
+        const { text, count } = transform(plugin, await plugin.app.vault.read(f));
+        if (count) {
+          await plugin.app.vault.modify(f, text);
+          files++;
+          total += count;
+        }
+      }
+      new Notice2(t2(noticeKey, { n: total, files }));
+    }
+    module2.exports = { SKIP_NODE, refreshEffect, refreshStaleLinks, staleLinksExtension, rewriteActiveNote, rewriteVault };
+  }
+});
+
+// src/shared/update-preview.js
+var require_update_preview = __commonJS({
+  "src/shared/update-preview.js"(exports2, module2) {
+    "use strict";
+    var { Notice: Notice2, Modal, MarkdownView: MarkdownView2 } = require("obsidian");
+    var { t: t2 } = require_i18n();
+    var MAX_ROWS = 50;
+    var UpdatePreviewModal = class extends Modal {
+      constructor(app, entries, onApply, prefix) {
+        super(app);
+        this.entries = entries;
+        this.onApply = onApply;
+        this.prefix = prefix;
+        for (const e of entries)
+          for (const c of e.changes)
+            c.selected = true;
+      }
+      cls(suffix) {
+        return suffix ? this.prefix + "-" + suffix : this.prefix;
+      }
+      onOpen() {
+        const { contentEl } = this;
+        contentEl.addClass(this.cls());
+        contentEl.createEl("h3", { text: t2("modal.update.title") });
+        const changed = this.entries.filter((e) => e.changes.length);
+        const total = changed.reduce((n, e) => n + e.changes.length, 0);
+        const brokenTotal = this.entries.reduce((n, e) => n + e.broken.length, 0);
+        if (!total && !brokenTotal) {
+          contentEl.createEl("p", { cls: this.cls("empty"), text: t2("modal.update.upToDate") });
+        } else {
+          if (total)
+            contentEl.createEl("p", { text: t2("modal.update.summary", { links: total, files: changed.length }) });
+          if (brokenTotal)
+            contentEl.createEl("p", { cls: this.cls("attention"), text: t2("modal.update.attention", { n: brokenTotal }) });
+          this.entries.forEach((e) => this.renderEntry(contentEl, e));
+        }
+        const bar = contentEl.createDiv({ cls: this.cls("buttons") });
+        if (total) {
+          bar.createEl("button", { text: t2("btn.apply"), cls: "mod-cta" }).onclick = async () => {
+            this.close();
+            await this.onApply(this.entries);
+          };
+          bar.createEl("button", { text: t2("btn.cancel") }).onclick = () => this.close();
+        } else {
+          bar.createEl("button", { text: t2("btn.close"), cls: "mod-cta" }).onclick = () => this.close();
+        }
+      }
+      renderEntry(contentEl, e) {
+        if (!e.changes.length && !e.broken.length)
+          return;
+        const head = contentEl.createDiv({ cls: this.cls("file") });
+        if (e.changes.length) {
+          const rowBoxes = [];
+          const label = head.createEl("label", { cls: this.cls("check") });
+          const master = label.createEl("input", { type: "checkbox" });
+          master.checked = true;
+          master.onchange = () => {
+            e.changes.forEach((c, i) => {
+              c.selected = master.checked;
+              if (rowBoxes[i])
+                rowBoxes[i].checked = master.checked;
+            });
+            master.indeterminate = false;
+          };
+          label.createSpan({ text: e.label });
+          const syncMaster = () => {
+            const on = e.changes.filter((c) => c.selected).length;
+            master.checked = on > 0;
+            master.indeterminate = on > 0 && on < e.changes.length;
+          };
+          const table = contentEl.createEl("table", { cls: this.cls("table") });
+          e.changes.slice(0, MAX_ROWS).forEach((c) => {
+            const tr = table.createEl("tr");
+            const cb = tr.createEl("td", { cls: this.cls("pick") }).createEl("input", { type: "checkbox" });
+            cb.checked = c.selected;
+            cb.onchange = () => {
+              c.selected = cb.checked;
+              syncMaster();
+            };
+            rowBoxes.push(cb);
+            tr.createEl("td", { text: c.label });
+            if (c.toPath) {
+              tr.addClass(this.cls("moved"));
+              tr.createEl("td", { cls: this.cls("move"), text: c.fromPath + ":" + c.from + " \u2192 " + c.toPath + ":" + c.to });
+            } else {
+              tr.createEl("td", { cls: this.cls("move"), text: c.from + " \u2192 " + c.to });
+            }
+          });
+          if (e.changes.length > MAX_ROWS)
+            contentEl.createEl("div", { cls: this.cls("more"), text: t2("modal.andMore", { n: e.changes.length - MAX_ROWS }) });
+        } else {
+          head.setText(e.label);
+        }
+        e.broken.forEach((label) => contentEl.createDiv({ cls: this.cls("broken"), text: t2("modal.update.brokenRow", { label }) }));
+      }
+      onClose() {
+        this.contentEl.empty();
+      }
+    };
+    async function applyUpdates(plugin, entries, rewrite) {
+      let files = 0, total = 0, skipped = 0;
+      for (const e of entries) {
+        const keys = new Set(e.changes.filter((c) => c.selected).map((c) => c.key));
+        if (!keys.size)
+          continue;
+        if (e.editor) {
+          if (e.editor.getValue() !== e.original) {
+            skipped++;
+            continue;
+          }
+          const { newText, count } = rewrite(plugin, e.original, keys);
+          const cur = e.editor.getCursor();
+          e.editor.setValue(newText);
+          e.editor.setCursor(cur);
+          files++;
+          total += count;
+        } else {
+          let count = 0;
+          await plugin.app.vault.process(e.file, (data) => {
+            if (data !== e.original)
+              return data;
+            const out = rewrite(plugin, data, keys);
+            count = out.count;
+            return out.newText;
+          });
+          if (count) {
+            files++;
+            total += count;
+          } else
+            skipped++;
+        }
+      }
+      let msg = t2("notice.linksUpdatedVault", { n: total, files });
+      if (skipped)
+        msg += " " + t2("notice.updateSkipped", { n: skipped });
+      new Notice2(msg);
+    }
+    function openUpdatePreview(plugin, entries, rewrite, prefix) {
+      new UpdatePreviewModal(plugin.app, entries, (chosen) => applyUpdates(plugin, chosen, rewrite), prefix).open();
+    }
+    async function updateInActiveNote(plugin, rewrite, prefix) {
+      const view = plugin.app.workspace.getActiveViewOfType(MarkdownView2);
+      const editor = view && view.editor;
+      const file = plugin.app.workspace.getActiveFile();
+      if (editor) {
+        const original2 = editor.getValue();
+        const c2 = rewrite(plugin, original2, null);
+        openUpdatePreview(plugin, [{ editor, label: file && file.path || t2("label.thisNote"), original: original2, changes: c2.changes, broken: c2.broken }], rewrite, prefix);
+        return;
+      }
+      if (!file) {
+        new Notice2(t2("notice.linksUpdated", { n: 0 }));
+        return;
+      }
+      const original = await plugin.app.vault.read(file);
+      const c = rewrite(plugin, original, null);
+      openUpdatePreview(plugin, [{ file, label: file.path, original, changes: c.changes, broken: c.broken }], rewrite, prefix);
+    }
+    async function updateInVault(plugin, rewrite, prefix) {
+      const entries = [];
+      for (const f of plugin.app.vault.getMarkdownFiles()) {
+        const original = await plugin.app.vault.read(f);
+        const c = rewrite(plugin, original, null);
+        if (c.changes.length || c.broken.length)
+          entries.push({ file: f, label: f.path, original, changes: c.changes, broken: c.broken });
+      }
+      openUpdatePreview(plugin, entries, rewrite, prefix);
+    }
+    module2.exports = { UpdatePreviewModal, applyUpdates, openUpdatePreview, updateInActiveNote, updateInVault };
+  }
+});
+
+// src/actualize.js
+var require_actualize2 = __commonJS({
+  "src/actualize.js"(exports2, module2) {
+    "use strict";
+    var { splitTarget: splitTarget2, withTitle: withTitle2, rewriteLinks, rewriteFences } = require_markdown();
+    var { LINE_RE: LINE_RE2, parseBinding: parseBinding2, ownsBinding } = require_binding();
+    var shared = require_actualize();
+    var OWNER2 = "code";
+    var { parseSpec: parseSpec2, setBindLine } = require_embed();
+    var preview = require_update_preview();
+    var { t: t2 } = require_i18n();
+    var PREVIEW_CLASS = "code-linker-preview";
+    var EMBED_LANG = "code-link";
+    var rewriteUpdates = (plugin, text, selected) => {
+      const lineOf = (t3) => {
+        const m = LINE_RE2.exec(t3);
+        return m ? m[1] : "";
+      };
+      const collect = selected == null;
+      const changes = [];
+      const broken = [];
+      let key = 0;
+      const links = rewriteLinks(text, (name, target) => {
+        const r = bindStateOf(plugin, target);
+        if (r && r.state === "stale") {
+          const k = key++;
+          const { url, title } = splitTarget2(target);
+          if (collect) {
+            const row = { key: k, label: name, from: lineOf(url), to: String(r.line) };
+            if (r.move) {
+              row.fromPath = r.move.from;
+              row.toPath = r.move.to;
+            }
+            changes.push(row);
+          }
+          if (!collect && !selected.has(k))
+            return null;
+          const fixedUrl = r.url != null ? r.url : url.replace(LINE_RE2, ":" + r.line);
+          return "[" + name + "](" + withTitle2(fixedUrl, title) + ")";
+        }
+        if (collect && r && r.state === "broken")
+          broken.push(name);
+        return null;
+      });
+      const embeds = rewriteFences(links.text, EMBED_LANG, (body) => {
+        const d = plugin.embedDrift(body);
+        if (!d)
+          return null;
+        if (d.state === "broken") {
+          if (collect)
+            broken.push(d.path);
+          return null;
+        }
+        const k = key++;
+        if (collect)
+          changes.push({ key: k, label: d.path, from: d.from, to: d.to });
+        if (!collect && !selected.has(k))
+          return null;
+        return d.out;
+      });
+      return { newText: embeds.text, count: links.count + embeds.count, changes, broken };
+    };
+    var pinLinksInText = (anchors) => (plugin, text) => {
+      const links = rewriteLinks(text, (name, target) => {
+        const { url, title } = splitTarget2(target);
+        if (title)
+          return null;
+        const bind = plugin.buildPinTitle(plugin.linkSite(target), anchors);
+        return bind ? "[" + name + "](" + withTitle2(url, bind) + ")" : null;
+      });
+      const embeds = rewriteFences(links.text, EMBED_LANG, (body) => {
+        const spec = parseSpec2(body.join("\n"));
+        if (spec.bind)
+          return null;
+        const bind = plugin.buildPinTitle(plugin.embedSite(spec), anchors);
+        return bind ? setBindLine(body, bind) : null;
+      });
+      return { text: embeds.text, count: links.count + embeds.count };
+    };
+    var { refreshStaleLinks } = shared;
+    var staleLinksExtension = (plugin) => shared.staleLinksExtension(plugin, { stale: "code-linker-stale", broken: "code-linker-broken" });
+    function bindStateOf(plugin, target) {
+      const { url, title } = splitTarget2(target);
+      const m = url && LINE_RE2.exec(url);
+      const b = ownsBinding(title, OWNER2) ? parseBinding2(title) : null;
+      return m && b ? plugin.urlBindState(url, b, parseInt(m[1], 10)) : null;
+    }
+    var methods = {
+      linkState(target) {
+        const r = bindStateOf(this, target);
+        return r ? r.state : null;
+      },
+      isLinkStale(target) {
+        return this.linkState(target) === "stale";
+      },
+      // The link target with its line corrected, or null when there's nothing to fix. Shared
+      // by the note/vault commands and the right-click fix.
+      actualizedTarget(target) {
+        const r = bindStateOf(this, target);
+        if (!r || r.state !== "stale")
+          return null;
+        const { url, title } = splitTarget2(target);
+        return withTitle2(r.url != null ? r.url : url.replace(LINE_RE2, ":" + r.line), title);
+      },
+      rewriteActiveNote(transform, noticeKey) {
+        return shared.rewriteActiveNote(this, transform, noticeKey);
+      },
+      rewriteVault(transform, noticeKey) {
+        return shared.rewriteVault(this, transform, noticeKey);
+      },
+      updateLinksInActiveNote() {
+        return preview.updateInActiveNote(this, rewriteUpdates, PREVIEW_CLASS);
+      },
+      updateLinksInVault() {
+        return preview.updateInVault(this, rewriteUpdates, PREVIEW_CLASS);
+      },
+      pinLinksInActiveNote(anchors) {
+        return this.rewriteActiveNote(pinLinksInText(anchors), "notice.linksPinned");
+      },
+      pinLinksInVault(anchors) {
+        return this.rewriteVault(pinLinksInText(anchors), "notice.linksPinnedVault");
+      }
+    };
+    module2.exports = { methods, staleLinksExtension, refreshStaleLinks };
+  }
+});
+
 // src/modal.js
 var require_modal = __commonJS({
   "src/modal.js"(exports2, module2) {
@@ -1417,372 +1874,7 @@ var require_modal = __commonJS({
         this.contentEl.empty();
       }
     };
-    var UpdatePreviewModal = class extends Modal {
-      constructor(app, entries, onApply) {
-        super(app);
-        this.entries = entries;
-        this.onApply = onApply;
-        for (const e of entries)
-          for (const c of e.changes)
-            c.selected = true;
-      }
-      onOpen() {
-        const { contentEl } = this;
-        contentEl.addClass("code-linker-preview");
-        contentEl.createEl("h3", { text: t2("modal.update.title") });
-        const changed = this.entries.filter((e) => e.changes.length);
-        const total = changed.reduce((n, e) => n + e.changes.length, 0);
-        const brokenTotal = this.entries.reduce((n, e) => n + e.broken.length, 0);
-        if (!total && !brokenTotal) {
-          contentEl.createEl("p", { cls: "code-linker-preview-empty", text: t2("modal.update.upToDate") });
-        } else {
-          if (total)
-            contentEl.createEl("p", { text: t2("modal.update.summary", { links: total, files: changed.length }) });
-          if (brokenTotal)
-            contentEl.createEl("p", { cls: "code-linker-preview-attention", text: t2("modal.update.attention", { n: brokenTotal }) });
-          this.entries.forEach((e) => this.renderEntry(contentEl, e));
-        }
-        const bar = contentEl.createDiv({ cls: "code-linker-preview-buttons" });
-        if (total) {
-          bar.createEl("button", { text: t2("btn.apply"), cls: "mod-cta" }).onclick = async () => {
-            this.close();
-            await this.onApply(this.entries);
-          };
-          bar.createEl("button", { text: t2("btn.cancel") }).onclick = () => this.close();
-        } else {
-          bar.createEl("button", { text: t2("btn.close"), cls: "mod-cta" }).onclick = () => this.close();
-        }
-      }
-      renderEntry(contentEl, e) {
-        if (!e.changes.length && !e.broken.length)
-          return;
-        const head = contentEl.createDiv({ cls: "code-linker-preview-file" });
-        if (e.changes.length) {
-          const rowBoxes = [];
-          const label = head.createEl("label", { cls: "code-linker-preview-check" });
-          const master = label.createEl("input", { type: "checkbox" });
-          master.checked = true;
-          master.onchange = () => {
-            e.changes.forEach((c, i) => {
-              c.selected = master.checked;
-              if (rowBoxes[i])
-                rowBoxes[i].checked = master.checked;
-            });
-            master.indeterminate = false;
-          };
-          label.createSpan({ text: e.label });
-          const syncMaster = () => {
-            const on = e.changes.filter((c) => c.selected).length;
-            master.checked = on > 0;
-            master.indeterminate = on > 0 && on < e.changes.length;
-          };
-          const table = contentEl.createEl("table", { cls: "code-linker-preview-table" });
-          e.changes.slice(0, 50).forEach((c) => {
-            const tr = table.createEl("tr");
-            const cb = tr.createEl("td", { cls: "code-linker-preview-pick" }).createEl("input", { type: "checkbox" });
-            cb.checked = c.selected;
-            cb.onchange = () => {
-              c.selected = cb.checked;
-              syncMaster();
-            };
-            rowBoxes.push(cb);
-            tr.createEl("td", { text: c.label });
-            if (c.toPath) {
-              tr.addClass("code-linker-preview-moved");
-              tr.createEl("td", { cls: "code-linker-preview-move", text: c.fromPath + ":" + c.from + " \u2192 " + c.toPath + ":" + c.to });
-            } else {
-              tr.createEl("td", { cls: "code-linker-preview-move", text: c.from + " \u2192 " + c.to });
-            }
-          });
-          if (e.changes.length > 50)
-            contentEl.createEl("div", { cls: "code-linker-preview-more", text: t2("modal.andMore", { n: e.changes.length - 50 }) });
-        } else {
-          head.setText(e.label);
-        }
-        e.broken.forEach((label) => contentEl.createDiv({ cls: "code-linker-preview-broken", text: t2("modal.update.brokenRow", { label }) }));
-      }
-      onClose() {
-        this.contentEl.empty();
-      }
-    };
-    module2.exports = { CodeLinkModal: CodeLinkModal2, PresetPickerModal: PresetPickerModal2, LinePromptModal: LinePromptModal2, PinAnchorModal: PinAnchorModal2, UpdatePreviewModal };
-  }
-});
-
-// src/actualize.js
-var require_actualize = __commonJS({
-  "src/actualize.js"(exports2, module2) {
-    "use strict";
-    var { Notice: Notice2, MarkdownView: MarkdownView2 } = require("obsidian");
-    var { ViewPlugin, Decoration } = require("@codemirror/view");
-    var { RangeSetBuilder, StateEffect } = require("@codemirror/state");
-    var { syntaxTree } = require("@codemirror/language");
-    var { linkRegex: linkRegex2, splitTarget: splitTarget2, withTitle: withTitle2, rewriteLinks, rewriteFences } = require_markdown();
-    var { LINE_RE: LINE_RE2, parseBinding: parseBinding2 } = require_binding();
-    var { parseSpec: parseSpec2, setBindLine } = require_embed();
-    var { UpdatePreviewModal } = require_modal();
-    var { t: t2 } = require_i18n();
-    var SKIP_NODE = /code|comment|frontmatter/i;
-    var EMBED_LANG = "code-link";
-    var rewriteUpdates = (plugin, text, selected) => {
-      const lineOf = (t3) => {
-        const m = LINE_RE2.exec(t3);
-        return m ? m[1] : "";
-      };
-      const collect = selected == null;
-      const changes = [];
-      const broken = [];
-      let key = 0;
-      const links = rewriteLinks(text, (name, target) => {
-        const r = bindStateOf(plugin, target);
-        if (r && r.state === "stale") {
-          const k = key++;
-          const { url, title } = splitTarget2(target);
-          if (collect) {
-            const row = { key: k, label: name, from: lineOf(url), to: String(r.line) };
-            if (r.move) {
-              row.fromPath = r.move.from;
-              row.toPath = r.move.to;
-            }
-            changes.push(row);
-          }
-          if (!collect && !selected.has(k))
-            return null;
-          const fixedUrl = r.url != null ? r.url : url.replace(LINE_RE2, ":" + r.line);
-          return "[" + name + "](" + withTitle2(fixedUrl, title) + ")";
-        }
-        if (collect && r && r.state === "broken")
-          broken.push(name);
-        return null;
-      });
-      const embeds = rewriteFences(links.text, EMBED_LANG, (body) => {
-        const d = plugin.embedDrift(body);
-        if (!d)
-          return null;
-        if (d.state === "broken") {
-          if (collect)
-            broken.push(d.path);
-          return null;
-        }
-        const k = key++;
-        if (collect)
-          changes.push({ key: k, label: d.path, from: d.from, to: d.to });
-        if (!collect && !selected.has(k))
-          return null;
-        return d.out;
-      });
-      return { newText: embeds.text, count: links.count + embeds.count, changes, broken };
-    };
-    var pinLinksInText = (anchors) => (plugin, text) => {
-      const links = rewriteLinks(text, (name, target) => {
-        const { url, title } = splitTarget2(target);
-        if (title)
-          return null;
-        const bind = plugin.buildPinTitle(plugin.linkSite(target), anchors);
-        return bind ? "[" + name + "](" + withTitle2(url, bind) + ")" : null;
-      });
-      const embeds = rewriteFences(links.text, EMBED_LANG, (body) => {
-        const spec = parseSpec2(body.join("\n"));
-        if (spec.bind)
-          return null;
-        const bind = plugin.buildPinTitle(plugin.embedSite(spec), anchors);
-        return bind ? setBindLine(body, bind) : null;
-      });
-      return { text: embeds.text, count: links.count + embeds.count };
-    };
-    var refreshEffect = StateEffect.define();
-    function refreshStaleLinks(app) {
-      app.workspace.iterateAllLeaves((leaf) => {
-        const cm = leaf.view && leaf.view.editor && leaf.view.editor.cm;
-        if (cm)
-          cm.dispatch({ effects: refreshEffect.of(null) });
-      });
-    }
-    function staleLinksExtension(plugin) {
-      const marks = {
-        stale: Decoration.mark({ class: "code-linker-stale" }),
-        broken: Decoration.mark({ class: "code-linker-broken" })
-      };
-      const build = (view) => {
-        const builder = new RangeSetBuilder();
-        if (plugin.settings.markStaleLinks) {
-          const tree = syntaxTree(view.state);
-          for (const { from, to } of view.visibleRanges) {
-            const text = view.state.doc.sliceString(from, to);
-            const re = linkRegex2();
-            let m;
-            while (m = re.exec(text)) {
-              const start = from + m.index;
-              const end = start + m[0].length;
-              let inCodeNode = false;
-              tree.iterate({ from: start, to: end, enter: (n) => {
-                if (SKIP_NODE.test(n.type.name))
-                  inCodeNode = true;
-              } });
-              const state = inCodeNode ? null : plugin.linkState(m[2]);
-              if (state)
-                builder.add(start, end, marks[state]);
-            }
-          }
-        }
-        return builder.finish();
-      };
-      return ViewPlugin.fromClass(
-        class {
-          constructor(view) {
-            this.decorations = build(view);
-          }
-          update(u) {
-            const refresh = u.transactions.some((tr) => tr.effects.some((e) => e.is(refreshEffect)));
-            if (u.docChanged || u.viewportChanged || refresh)
-              this.decorations = build(u.view);
-          }
-        },
-        { decorations: (v) => v.decorations }
-      );
-    }
-    function bindStateOf(plugin, target) {
-      const { url, title } = splitTarget2(target);
-      const m = url && LINE_RE2.exec(url);
-      const b = parseBinding2(title);
-      return m && b ? plugin.urlBindState(url, b, parseInt(m[1], 10)) : null;
-    }
-    var methods = {
-      linkState(target) {
-        const r = bindStateOf(this, target);
-        return r ? r.state : null;
-      },
-      isLinkStale(target) {
-        return this.linkState(target) === "stale";
-      },
-      // The link target with its line corrected, or null when there's nothing to fix. Shared
-      // by the note/vault commands and the right-click fix.
-      actualizedTarget(target) {
-        const r = bindStateOf(this, target);
-        if (!r || r.state !== "stale")
-          return null;
-        const { url, title } = splitTarget2(target);
-        return withTitle2(r.url != null ? r.url : url.replace(LINE_RE2, ":" + r.line), title);
-      },
-      // An open editor keeps cursor and undo; in reading view there's none, so the active
-      // file is rewritten through the vault.
-      async rewriteActiveNote(transform, noticeKey) {
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView2);
-        const editor = view && view.editor;
-        if (editor) {
-          const { text: text2, count: count2 } = transform(this, editor.getValue());
-          if (count2) {
-            const cur = editor.getCursor();
-            editor.setValue(text2);
-            editor.setCursor(cur);
-          }
-          new Notice2(t2(noticeKey, { n: count2 }));
-          return;
-        }
-        const file = this.app.workspace.getActiveFile();
-        if (!file) {
-          new Notice2(t2(noticeKey, { n: 0 }));
-          return;
-        }
-        const { text, count } = transform(this, await this.app.vault.read(file));
-        if (count)
-          await this.app.vault.modify(file, text);
-        new Notice2(t2(noticeKey, { n: count }));
-      },
-      async rewriteVault(transform, noticeKey) {
-        let files = 0, total = 0;
-        for (const f of this.app.vault.getMarkdownFiles()) {
-          const { text, count } = transform(this, await this.app.vault.read(f));
-          if (count) {
-            await this.app.vault.modify(f, text);
-            files++;
-            total += count;
-          }
-        }
-        new Notice2(t2(noticeKey, { n: total, files }));
-      },
-      // Both update commands preview first: an open editor is previewed and written through the
-      // editor (cursor and undo survive), everything else through the vault.
-      async updateLinksInActiveNote() {
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView2);
-        const editor = view && view.editor;
-        const file = this.app.workspace.getActiveFile();
-        if (editor) {
-          const original2 = editor.getValue();
-          const c2 = rewriteUpdates(this, original2, null);
-          this.openUpdatePreview([{ editor, label: file && file.path || t2("label.thisNote"), original: original2, changes: c2.changes, broken: c2.broken }]);
-          return;
-        }
-        if (!file) {
-          new Notice2(t2("notice.linksUpdated", { n: 0 }));
-          return;
-        }
-        const original = await this.app.vault.read(file);
-        const c = rewriteUpdates(this, original, null);
-        this.openUpdatePreview([{ file, label: file.path, original, changes: c.changes, broken: c.broken }]);
-      },
-      async updateLinksInVault() {
-        const entries = [];
-        for (const f of this.app.vault.getMarkdownFiles()) {
-          const original = await this.app.vault.read(f);
-          const c = rewriteUpdates(this, original, null);
-          if (c.changes.length || c.broken.length)
-            entries.push({ file: f, label: f.path, original, changes: c.changes, broken: c.broken });
-        }
-        this.openUpdatePreview(entries);
-      },
-      openUpdatePreview(entries) {
-        new UpdatePreviewModal(this.app, entries, (chosen) => this.applyUpdates(chosen)).open();
-      },
-      // Apply the changes the user kept, note by note: each note is rebuilt from just its
-      // selected keys and written under a guard, so a note edited since the preview is skipped,
-      // not clobbered. process reads and writes as one, so the guard can't race.
-      async applyUpdates(entries) {
-        let files = 0, total = 0, skipped = 0;
-        for (const e of entries) {
-          const keys = new Set(e.changes.filter((c) => c.selected).map((c) => c.key));
-          if (!keys.size)
-            continue;
-          if (e.editor) {
-            if (e.editor.getValue() !== e.original) {
-              skipped++;
-              continue;
-            }
-            const { newText, count } = rewriteUpdates(this, e.original, keys);
-            const cur = e.editor.getCursor();
-            e.editor.setValue(newText);
-            e.editor.setCursor(cur);
-            files++;
-            total += count;
-          } else {
-            let count = 0;
-            await this.app.vault.process(e.file, (data) => {
-              if (data !== e.original)
-                return data;
-              const out = rewriteUpdates(this, data, keys);
-              count = out.count;
-              return out.newText;
-            });
-            if (count) {
-              files++;
-              total += count;
-            } else
-              skipped++;
-          }
-        }
-        let msg = t2("notice.linksUpdatedVault", { n: total, files });
-        if (skipped)
-          msg += " " + t2("notice.updateSkipped", { n: skipped });
-        new Notice2(msg);
-      },
-      pinLinksInActiveNote(anchors) {
-        return this.rewriteActiveNote(pinLinksInText(anchors), "notice.linksPinned");
-      },
-      pinLinksInVault(anchors) {
-        return this.rewriteVault(pinLinksInText(anchors), "notice.linksPinnedVault");
-      }
-    };
-    module2.exports = { methods, staleLinksExtension, refreshStaleLinks };
+    module2.exports = { CodeLinkModal: CodeLinkModal2, PresetPickerModal: PresetPickerModal2, LinePromptModal: LinePromptModal2, PinAnchorModal: PinAnchorModal2 };
   }
 });
 
@@ -2741,8 +2833,11 @@ var readline = require("readline");
 var nodePath = require("path");
 var { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, parseSkip, underSkip, pathInTarget } = require_constants();
 var { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require_markdown();
-var { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom } = require_binding();
+var { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require_binding();
+var { fillRoot: fillRootToken, ownsRootToken } = require_root_token();
 var { resolveGit, resolveGitDir } = require_git();
+var OWNER = "code";
+var SIBLING_ID = "reference-linker";
 var GIT_PLACEHOLDER = /{(?:gitRemote|gitSha|gitBranch)}/;
 var LINE_TOKEN = /[^\w{}]*[A-Za-z]*\{line\}/;
 var PRODUCT_PLACEHOLDER = /{(?:jetbrainsProduct|product)}/;
@@ -2752,7 +2847,7 @@ var { CodeIndexSuggest } = require_suggest();
 var filter = require_filter();
 var { HoverPreview } = require_hover();
 var { registerEmbed, parseSpec, splitPathRange, resolvePath } = require_embed();
-var actualize = require_actualize();
+var actualize = require_actualize2();
 var { CodeLinkModal, PresetPickerModal, LinePromptModal, PinAnchorModal } = require_modal();
 var { CodeLinkerSettingTab } = require_settings_tab();
 var { initI18n, t, plural } = require_i18n();
@@ -2893,19 +2988,39 @@ var CodeLinkerPlugin = class extends Plugin {
     if (!known)
       editors.push({ name: "Custom", template: tpl });
   }
-  // Obsidian URL-encodes the braces in a rendered href, so match both forms.
-  fillRoot(v) {
+  // Our own {code-root} is always ours to fill. A bare {root} predates the namespacing and
+  // Reference Linker used to fill it too, so it takes a verdict — see legacyRootIsOurs.
+  // The default claims it, which is what every call about our own links wants; only the
+  // render path, where another plugin's links go past, asks first.
+  fillRoot(v, claimLegacy = true) {
     const root = encodeURI(this.codeRoot().split(nodePath.sep).join("/"));
-    return v.replace(/\{root\}|%7Broot%7D/gi, root);
+    return fillRootToken(v, { owner: OWNER, root, claimLegacy });
+  }
+  siblingLinkerInstalled() {
+    const plugins = this.app.plugins && this.app.plugins.plugins;
+    return !!(plugins && plugins[SIBLING_ID]);
+  }
+  // Whether a bare {root} in a rendered link is ours to resolve. The binding settles it
+  // when there is one. Failing that, being the only linker installed makes every legacy
+  // link ours, which keeps a solo vault behaving exactly as it always did. Otherwise the
+  // link has to point at something inside our root to count as ours.
+  legacyRootIsOurs(url, title) {
+    const owner = bindingOwner(title);
+    if (owner)
+      return owner === OWNER;
+    if (!this.siblingLinkerInstalled())
+      return true;
+    return !!this.targetIndexedFile(this.decodeTarget(url));
   }
   resolveRootLinks(el) {
     const links = el.querySelectorAll ? el.querySelectorAll("a") : [];
     for (const a of links) {
+      const title = a.getAttribute("title") || "";
       for (const attr of ["href", "data-href"]) {
         const v = a.getAttribute(attr);
         if (!v)
           continue;
-        const out = this.fillRoot(v);
+        const out = this.fillRoot(v, this.legacyRootIsOurs(v, title));
         if (out !== v)
           a.setAttribute(attr, out);
       }
@@ -3068,8 +3183,10 @@ var CodeLinkerPlugin = class extends Plugin {
     }
     return null;
   }
-  // The link under the click resolved, if it carries a {root} token (else null,
-  // so a plain link falls through to Obsidian's own opener).
+  // The link under the click resolved, if the token it carries is ours — else null, so a
+  // plain link falls through to Obsidian's own opener and the other linker's link falls
+  // through to that plugin. Both register a highest-precedence handler, so each has to
+  // claim only its own; otherwise the winner comes down to which plugin loaded first.
   rootUriAt(evt, view) {
     const el = evt.target;
     if (!el || !el.closest || !el.closest(".cm-link"))
@@ -3077,8 +3194,9 @@ var CodeLinkerPlugin = class extends Plugin {
     const ref = this.codeRefAt(view, evt.clientX, evt.clientY);
     if (!ref)
       return null;
-    const { url } = splitTarget(ref.target);
-    return /\{root\}|%7Broot%7D/i.test(url) ? this.fillRoot(url) : null;
+    const { url, title } = splitTarget(ref.target);
+    const claimLegacy = this.legacyRootIsOurs(url, title);
+    return ownsRootToken(url, OWNER, claimLegacy) ? this.fillRoot(url, claimLegacy) : null;
   }
   // Absolute base folder the scan paths are resolved against.
   codeRoot() {
