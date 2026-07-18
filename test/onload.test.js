@@ -1,13 +1,9 @@
 'use strict';
 
-// The plugin must survive being constructed and loaded.
-//
-// This exists because in a sibling plugin it didn't: a helper was deleted while a call to it
-// stayed behind, and the plugin threw in onload and refused to load at all. esbuild bundles
-// an undefined identifier happily, and no other test reaches the event wiring — so "it builds
-// and the tests pass" said nothing about whether the plugin runs. This runs it.
+// The plugin must survive being constructed and loaded. esbuild happily bundles a call to a
+// deleted helper, so "it builds" says nothing about whether onload runs — this runs it.
 
-const { describe, it, assert } = require('./harness');
+const { describe, it, assert } = require('../src/shared/testing/harness');
 const path = require('path');
 const { fakeApp, installStubs, recordingMenu, fakeEditor } = require('./stubs/app');
 
@@ -44,17 +40,13 @@ describe('onload', () => {
   });
 
   it('leaves a link carrying the reference linker’s anchor alone', async () => {
-    // The whole point of the graded claim: our index may well hold this file, but the
-    // author already said what the link is, and it is not a code link.
     const plugin = await load();
     const claim = plugin.api.linker.claim('file:///x/Spec.pdf', 'sec:Overview');
     assert.strictEqual(claim, null);
   });
 
   it('builds the editor menu without throwing', async () => {
-    // The handler itself, not just the registration. Everything the reader sees in the
-    // right-click menu is built in here, and nothing else in the suite runs a line of it —
-    // which is how a call to a deleted helper survived a green test run once already.
+    // The handler itself, not just the registration — nothing else in the suite runs it.
     const plugin = await load();
     const handler = fakeApp.handlers.get('editor-menu');
     assert.ok(handler, 'no editor-menu handler was registered');
@@ -74,8 +66,8 @@ describe('onload', () => {
   });
 
   it('shares one entry per verb with the reference linker', async () => {
-    // The mechanism worth testing: two plugins with no shared memory have to land in the
-    // same submenu, which they do by parking it on the menu object they were both handed.
+    // Two plugins with no shared memory land in the same submenu by parking it on the menu
+    // object they were both handed.
     const plugin = await load();
     fakeApp.plugins.plugins = {
       'code-linker': plugin,
@@ -90,13 +82,9 @@ describe('onload', () => {
   });
 
   it('stands down on a link the reference linker has pinned to a section', async () => {
-    // The duplication this was written for: `sec:` makes the link a reference link, but a
-    // pdf sitting under a scanned code root is in our index too, so we recognised it as ours
-    // and the reader got two Copy items and two Unpins with nothing to tell them apart.
     const plugin = await load();
     const link = { target: 'file:///x/Spec.pdf "sec:Overview"' };
-    // We do recognise it as a link of the family — which is exactly why ownership, not
-    // recognition, has to be what gates the menu items.
+    // Ownership, not recognition, gates the menu items.
     assert.strictEqual(plugin.isCodeLink(link.target), true, 'precondition: we do recognise it');
 
     fakeApp.plugins.plugins = {
@@ -105,9 +93,8 @@ describe('onload', () => {
     };
     assert.strictEqual(plugin.ownsLinkAtCursor(link), false, 'both plugins would act on one link');
 
-    // And still not ours with the sibling uninstalled. The anchor says what the link is; a
-    // section-pinned link does not become a code link just because nothing else is there to
-    // claim it, and offering Unpin on it would rewrite a binding we do not understand.
+    // Still not ours with the sibling uninstalled: a section-pinned link does not become a
+    // code link just because nothing else is there to claim it.
     fakeApp.plugins.plugins = { 'code-linker': plugin };
     assert.strictEqual(plugin.ownsLinkAtCursor(link), false);
     fakeApp.plugins.plugins = {};

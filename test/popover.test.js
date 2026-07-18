@@ -1,14 +1,10 @@
 'use strict';
 
-// The popover shell: when it shows, when it refuses to, and where it lands.
-//
-// Three previews now sit on top of this — code snippets, PDF pages, and the prose linkers'
-// list of what a word could mean — so a mistake here is a mistake in all of them. The parts
-// worth pinning are the ones that are easy to get subtly wrong: not restarting the timer for
-// something already on screen, not revealing a render that has been superseded, and flipping
-// to the other side of the cursor at the edge of the window.
+// The popover shell: when it shows, when it refuses to, and where it lands. Three previews
+// sit on top of this — code snippets, PDF pages, the duplicate list — so a mistake here is
+// a mistake in all of them.
 
-const { describe, it, assert } = require('./harness');
+const { describe, it, assert } = require('../src/shared/testing/harness');
 const { Popover } = require('../src/shared/popover');
 
 // A DOM barely rich enough for the shell: classes, inline styles, and a box to measure.
@@ -93,9 +89,8 @@ describe('popover shell', () => {
   });
 
   it('refuses to reveal a superseded render even if the build does not check', async () => {
-    // The reason the shell owns the token rather than trusting each build with it: a slow
-    // read finishing after the pointer moved on would otherwise pop up content for a link
-    // the reader has already left. A build that forgets to check must not be able to.
+    // The shell owns the token: a build that forgets to check it must still be unable to
+    // reveal a superseded render.
     installDom();
     const pop = makePopover();
     pop.schedule('slow', 10, 10, async () => { await tick(); });

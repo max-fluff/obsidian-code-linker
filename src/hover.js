@@ -19,8 +19,7 @@ class HoverPreview {
     this.pop = new Popover({ cls: 'code-linker-hover code-linker-code', hiddenCls: 'code-linker-hidden' });
   }
 
-  // Read from onHoverMove to tell "nothing scheduled" from "waiting to show". It lives on
-  // the shell now, so it is forwarded rather than duplicated.
+  // Read from onHoverMove to tell "nothing scheduled" from "waiting to show".
   get pendingKey() { return this.pop.pendingKey; }
 
   isVisible() { return this.pop.isVisible(); }
