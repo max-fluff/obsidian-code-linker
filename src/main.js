@@ -19,8 +19,8 @@ const { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEM
 const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
 const { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require('./shared/binding');
 const { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require('./shared/root-token');
-const { menuSection, sharedSection } = require('./shared/menu');
-const { peersOffering } = require('./shared/discover');
+const { menuSection } = require('./shared/menu');
+const { buildMenu } = require('./shared/menu-verbs');
 const { ownsLink } = require('./shared/link-owner');
 const { resolveGit, resolveGitDir } = require('./git');
 
@@ -141,7 +141,7 @@ class CodeLinkerPlugin extends Plugin {
     this.addCommand({ id: 'update-links-vault', name: t('cmd.updateLinksVault'), callback: () => this.updateLinksInVault() });
 
     this.registerEvent(
-      this.app.workspace.on('editor-menu', (menu, editor) => {
+      this.app.workspace.on('editor-menu', (nativeMenu, editor) => buildMenu(this, nativeMenu, (menu) => {
         if (!this.settings.contextMenu) return;
         // Convert writes a link, so it's offered only where that's safe (not in a link,
         // code, or frontmatter); open is read-only, so it's offered anywhere but a link.
@@ -171,7 +171,7 @@ class CodeLinkerPlugin extends Plugin {
             menu.addItem((item) => item.setTitle(t('menu.unpin')).setIcon('pin-off').onClick(() => this.unbindLink(editor, link)));
           }
         }
-      })
+      }))
     );
 
     // Recompile + rebuild when the languages file is edited.
@@ -1456,16 +1456,11 @@ class CodeLinkerPlugin extends Plugin {
     editor.replaceRange(out, { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
   }
 
-  // One of the two selection verbs, nested under the verb itself when the reference linker
-  // will offer the same one. Whether to nest has to be settled before anything is written:
-  // an item already in Obsidian's menu can't be pulled back out and reparented, so we ask
-  // the sibling first rather than discovering the clash afterwards.
+  // One of the two selection verbs. The builder decides whether it ends up under the verb
+  // or on its own; the wording follows, since inside the submenu the verb is already named.
   selectionItem(menu, kind, icon, run) {
-    const provider = this.api && this.api.linker;
-    const shared = !!provider && peersOffering(this.app, provider, kind).length > 0;
-    const where = shared ? sharedSection(menu, 'linker:' + kind, t('menu.' + kind + '.group'), icon) : menu;
-    where.addItem((item) => item
-      .setTitle(t(shared ? 'menu.' + kind + '.item' : 'menu.' + kind + '.solo'))
+    menu.tagged(kind, {}, (item, grouped) => item
+      .setTitle(t('menu.' + kind + (grouped ? '.item' : '.solo')))
       .setIcon(icon)
       .onClick(run));
   }
