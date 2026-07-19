@@ -7,5 +7,7 @@ await buildPlugin({
   name: 'Code Linker',
   platform: 'node',
   external: ['obsidian', 'electron', 'fs', 'path', '@codemirror/view', '@codemirror/state', '@codemirror/language'],
+  kind: 'sigil',
+  prefix: 'code-linker',
   deployTargets,
 });

@@ -90,17 +90,4 @@ module.exports = {
     const enabled = new Set(this.settings.enabledLanguages || []);
     return this.languages.filter((l) => enabled.has(l.id)).map((l) => ({ id: l.id, name: l.name, extensions: l.extensions.slice() }));
   },
-
-  onIndexChange(cb) {
-    if (typeof cb !== 'function') return () => {};
-    if (!this._indexListeners) this._indexListeners = new Set();
-    this._indexListeners.add(cb);
-    return () => this._indexListeners.delete(cb);
-  },
-
-  notifyIndexChange() {
-    for (const cb of this._indexListeners || []) {
-      try { cb(); } catch (e) { /* subscriber threw */ }
-    }
-  },
 };

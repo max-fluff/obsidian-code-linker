@@ -1,3 +1,256 @@
+/* Code Linker 1.3.5 — assembled from the shared styles and src/styles.css by "npm run build". Do not edit directly. */
+
+/* Styles every linker plugin uses. The token below stands for the plugin class prefix;
+   build.mjs substitutes it when it assembles styles.css. See CONTRIBUTING.md. */
+
+.code-linker-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-ui-small);
+}
+
+.code-linker-preview-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.code-linker-folder-row .setting-item-name {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
+}
+
+.code-linker-folder-add {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 18px 1.5em;
+}
+
+.code-linker-folder-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.code-linker-folder-addbtn {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.code-linker-folder-addbtn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Priority order among the installed linker plugins. Our own row is the movable one, so
+   it is the one that reads as active; the others are context. */
+.code-linker-precedence-list {
+  margin: 0 0 18px 1.5em;
+}
+
+.code-linker-precedence-list .setting-item {
+  border-top: none;
+  /* Padding matches the folder-list rows, so this nested list lines up with the other one in the same pane: text off the left edge, arrows level with the remove buttons. */ padding: 4px 6px 4px 0.75em;
+}
+
+.code-linker-precedence-list .setting-item-name {
+  color: var(--text-muted);
+}
+
+.code-linker-precedence-self .setting-item-name {
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+
+/* Styles both sigil linkers use. The plugin class prefix is substituted by build.mjs. */
+
+.code-linker-suggestion {
+  display: flex;
+  gap: 0.5em;
+  align-items: baseline;
+}
+
+.code-linker-name {
+  font-weight: var(--font-semibold);
+}
+
+.code-linker-kind {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.code-linker-path {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.code-linker-input {
+  width: 100%;
+}
+
+/* Muted helper / status line under a control or section — one class for every such
+   note in the pane. .is-error tints it for a missing folder or other problem. */
+.code-linker-note {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin: 4px 0 14px;
+}
+
+.code-linker-note.is-error {
+  color: var(--text-error);
+}
+
+/* User editor preset rows: name + template + remove on one line, wrapping to
+   two lines on a narrow pane so nothing collides. The full control area is used
+   (the empty name label is hidden) and the theme styles the row like any other. */
+.code-linker-editor-row .setting-item-info {
+  display: none;
+}
+
+.code-linker-editor-row .setting-item-control {
+  width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.code-linker-editor-name {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.code-linker-editor-tpl {
+  flex: 3 1 240px;
+  min-width: 0;
+}
+
+.code-linker-hover {
+  position: fixed;
+  z-index: var(--layer-popover);
+  max-width: min(720px, 90vw);
+  box-shadow: var(--shadow-s);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.code-linker-hover.code-linker-hidden {
+  display: none;
+}
+
+.code-linker-embed {
+  margin: var(--p-spacing, 1em) 0;
+}
+
+.code-linker-embed-error,
+.code-linker-embed-note {
+  padding: 6px 10px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.code-linker-embed-error {
+  color: var(--text-error);
+}
+
+/* Drifted line (stale) and renamed/removed symbol (broken), in both render modes.
+   A border-bottom rather than text-decoration: wavy/offset underlines render
+   inconsistently across platforms, so a plain border is the reliable choice. */
+.code-linker-stale,
+.code-linker-broken {
+  border-bottom-width: 1px;
+  border-bottom-style: var(--code-linker-mark-underline-style, dotted);
+}
+
+.code-linker-stale {
+  border-bottom-color: var(--code-linker-stale-color, var(--text-warning));
+}
+
+.code-linker-broken {
+  border-bottom-color: var(--code-linker-broken-color, var(--text-error));
+}
+
+/* Nested sub-rows — searchable kinds under a language, and chosen folders under a
+   folder list — share one indent and compact height so the pane reads as one list
+   style. The kind rule is unqualified so it also indents the plain rebuild hint. */
+.code-linker-kind-row,
+.code-linker-folder-row {
+  margin-left: 1.5em;
+  padding-left: 0.75em;
+  border-left: 2px solid var(--background-modifier-border);
+}
+
+.code-linker-kind-row.setting-item,
+.code-linker-folder-row.setting-item {
+  border-top: 0;
+  padding: 4px 6px 4px 0.75em;
+}
+
+.code-linker-kind-row .setting-item-name {
+  font-size: 0.9em;
+  opacity: 0.85;
+}
+
+/* Folder-set editor: a full-width input with autocomplete and an add button below
+   the chosen-folder rows. */
+.code-linker-folder-rows:not(:empty) {
+  margin: 6px 0;
+}
+
+.code-linker-preview-file {
+  font-weight: var(--font-semibold);
+  margin: 12px 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.code-linker-preview-table td {
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 3px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.code-linker-preview-pick {
+  width: 1%;
+  padding-right: 0;
+  vertical-align: middle;
+}
+
+.code-linker-preview-move {
+  font-family: var(--font-monospace);
+  white-space: nowrap;
+  width: 1%;
+  color: var(--text-muted);
+}
+
+/* A guessed move (file matched by symbol or basename), not a plain line drift — tinted so
+   it stands out for a closer look before applying. */
+.code-linker-preview-moved .code-linker-preview-move {
+  color: var(--code-linker-stale-color, var(--text-warning));
+  white-space: normal;
+}
+
+.code-linker-preview-more,
+.code-linker-preview-empty {
+  color: var(--text-muted);
+  padding: 8px 0;
+}
+
+.code-linker-preview-attention {
+  color: var(--code-linker-broken-color, var(--text-error));
+}
+
+.code-linker-preview-broken {
+  font-size: var(--font-ui-small);
+  color: var(--code-linker-broken-color, var(--text-error));
+  padding: 2px 8px;
+  overflow-wrap: anywhere;
+}
+
 /* @settings
 
 name: Code Linker
@@ -43,60 +296,6 @@ settings:
 
 */
 
-.code-linker-suggestion {
-  display: flex;
-  gap: 0.5em;
-  align-items: baseline;
-}
-.code-linker-name {
-  font-weight: var(--font-semibold);
-}
-.code-linker-kind {
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-}
-.code-linker-path {
-  margin-left: auto;
-  color: var(--text-faint);
-  font-size: var(--font-ui-smaller);
-}
-
-.code-linker-input {
-  width: 100%;
-}
-
-/* Muted helper / status line under a control or section — one class for every such
-   note in the pane. .is-error tints it for a missing folder or other problem. */
-.code-linker-note {
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-  margin: 4px 0 14px;
-}
-.code-linker-note.is-error {
-  color: var(--text-error);
-}
-
-/* User editor preset rows: name + template + remove on one line, wrapping to
-   two lines on a narrow pane so nothing collides. The full control area is used
-   (the empty name label is hidden) and the theme styles the row like any other. */
-.code-linker-editor-row .setting-item-info {
-  display: none;
-}
-.code-linker-editor-row .setting-item-control {
-  width: 100%;
-  flex-wrap: wrap;
-  justify-content: flex-start;
-  gap: 8px;
-}
-.code-linker-editor-name {
-  flex: 1 1 140px;
-  min-width: 0;
-}
-.code-linker-editor-tpl {
-  flex: 3 1 240px;
-  min-width: 0;
-}
-
 /* Snippet chrome shared by the hover popover and the inline embed. Both containers carry
    .code-linker-code (see the token colours below). The popover is a fixed overlay; the
    embed flows inline — otherwise the parts match. --cl-lh is fixed so the highlight band
@@ -109,20 +308,7 @@ settings:
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m);
 }
-.code-linker-hover {
-  position: fixed;
-  z-index: var(--layer-popover);
-  max-width: min(720px, 90vw);
-  box-shadow: var(--shadow-s);
-  user-select: text;
-  -webkit-user-select: text;
-}
-.code-linker-hover.code-linker-hidden {
-  display: none;
-}
-.code-linker-embed {
-  margin: var(--p-spacing, 1em) 0;
-}
+
 .code-linker-hover-header,
 .code-linker-embed-header {
   padding: 4px 10px;
@@ -132,11 +318,13 @@ settings:
   font-family: var(--font-monospace);
   white-space: nowrap;
 }
+
 .code-linker-embed-header {
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
 }
+
 .code-linker-hover-body,
 .code-linker-embed-body {
   position: relative;
@@ -146,8 +334,15 @@ settings:
   font-size: var(--font-ui-smaller);
   --cl-lh: 1.5em;
 }
-.code-linker-hover-body { max-height: 40vh; }
-.code-linker-embed-body { max-height: 60vh; }
+
+.code-linker-hover-body {
+  max-height: 40vh;
+}
+
+.code-linker-embed-body {
+  max-height: 60vh;
+}
+
 /* The .code-linker-code prefix raises specificity above the theme's / editor's own
    `pre` rules — in Live Preview an embed is rendered where those would otherwise add a
    top margin, border or a different line-height and push the code off the fixed band. */
@@ -159,10 +354,11 @@ settings:
   padding: 0 10px;
   border: 0;
   background: transparent;
-  font-size: inherit; /* keep it equal to the band's, so their em line heights match */
-  line-height: var(--cl-lh);
+  font-size: inherit;
+  /* keep it equal to the band's, so their em line heights match */ line-height: var(--cl-lh);
   white-space: pre;
 }
+
 .code-linker-code .code-linker-hover-body code,
 .code-linker-code .code-linker-embed-body code {
   margin: 0;
@@ -172,13 +368,14 @@ settings:
   background: transparent;
   color: var(--code-normal, var(--text-normal));
 }
+
 .code-linker-hover-band,
 .code-linker-embed-band {
   position: absolute;
   left: 0;
   right: 0;
-  top: 0; /* actual row offset (row-index * line-height) is set inline */
-  height: var(--cl-lh);
+  top: 0;
+  /* actual row offset (row-index * line-height) is set inline */ height: var(--cl-lh);
   background: var(--code-linker-highlight-color, var(--text-selection));
   z-index: 0;
   pointer-events: none;
@@ -190,106 +387,68 @@ settings:
 .code-linker-code .token.comment,
 .code-linker-code .token.prolog,
 .code-linker-code .token.doctype,
-.code-linker-code .token.cdata { color: var(--code-comment, var(--text-faint)); }
-.code-linker-code .token.punctuation { color: var(--code-punctuation, var(--text-muted)); }
+.code-linker-code .token.cdata {
+  color: var(--code-comment, var(--text-faint));
+}
+
+.code-linker-code .token.punctuation {
+  color: var(--code-punctuation, var(--text-muted));
+}
+
 .code-linker-code .token.property,
 .code-linker-code .token.tag,
 .code-linker-code .token.constant,
 .code-linker-code .token.symbol,
-.code-linker-code .token.deleted { color: var(--code-tag, var(--text-normal)); }
+.code-linker-code .token.deleted {
+  color: var(--code-tag, var(--text-normal));
+}
+
 .code-linker-code .token.boolean,
-.code-linker-code .token.number { color: var(--code-value, var(--text-normal)); }
+.code-linker-code .token.number {
+  color: var(--code-value, var(--text-normal));
+}
+
 .code-linker-code .token.selector,
 .code-linker-code .token.attr-name,
 .code-linker-code .token.string,
 .code-linker-code .token.char,
 .code-linker-code .token.builtin,
-.code-linker-code .token.inserted { color: var(--code-string, var(--text-normal)); }
+.code-linker-code .token.inserted {
+  color: var(--code-string, var(--text-normal));
+}
+
 .code-linker-code .token.operator,
 .code-linker-code .token.entity,
-.code-linker-code .token.url { color: var(--code-operator, var(--text-normal)); }
+.code-linker-code .token.url {
+  color: var(--code-operator, var(--text-normal));
+}
+
 .code-linker-code .token.atrule,
 .code-linker-code .token.attr-value,
-.code-linker-code .token.keyword { color: var(--code-keyword, var(--text-accent)); }
+.code-linker-code .token.keyword {
+  color: var(--code-keyword, var(--text-accent));
+}
+
 .code-linker-code .token.function,
-.code-linker-code .token.class-name { color: var(--code-function, var(--text-normal)); }
+.code-linker-code .token.class-name {
+  color: var(--code-function, var(--text-normal));
+}
+
 .code-linker-code .token.regex,
 .code-linker-code .token.important,
-.code-linker-code .token.variable { color: var(--code-property, var(--text-normal)); }
-
-.code-linker-embed-error,
-.code-linker-embed-note {
-  padding: 6px 10px;
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
+.code-linker-code .token.variable {
+  color: var(--code-property, var(--text-normal));
 }
-.code-linker-embed-error { color: var(--text-error); }
-
-/* Drifted line (stale) and renamed/removed symbol (broken), in both render modes.
-   A border-bottom rather than text-decoration: wavy/offset underlines render
-   inconsistently across platforms, so a plain border is the reliable choice. */
-.code-linker-stale,
-.code-linker-broken {
-  border-bottom-width: 1px;
-  border-bottom-style: var(--code-linker-mark-underline-style, dotted);
-}
-.code-linker-stale { border-bottom-color: var(--code-linker-stale-color, var(--text-warning)); }
-.code-linker-broken { border-bottom-color: var(--code-linker-broken-color, var(--text-error)); }
 
 /* A pinned embed whose code moved is showing the wrong lines, so it says so: the header
    is tinted and a note under the snippet explains. Same colours as the link marks, but
    their own classes — an embed is a block, and the links' underline doesn't suit it. */
-.code-linker-embed-stale { color: var(--code-linker-stale-color, var(--text-warning)); }
-.code-linker-embed-broken { color: var(--code-linker-broken-color, var(--text-error)); }
-
-/* Nested sub-rows — searchable kinds under a language, and chosen folders under a
-   folder list — share one indent and compact height so the pane reads as one list
-   style. The kind rule is unqualified so it also indents the plain rebuild hint. */
-.code-linker-kind-row,
-.code-linker-folder-row {
-  margin-left: 1.5em;
-  padding-left: 0.75em;
-  border-left: 2px solid var(--background-modifier-border);
-}
-.code-linker-kind-row.setting-item,
-.code-linker-folder-row.setting-item {
-  border-top: 0;
-  padding: 4px 6px 4px 0.75em;
-}
-.code-linker-kind-row .setting-item-name {
-  font-size: 0.9em;
-  opacity: 0.85;
+.code-linker-embed-stale {
+  color: var(--code-linker-stale-color, var(--text-warning));
 }
 
-/* Folder-set editor: a full-width input with autocomplete and an add button below
-   the chosen-folder rows. */
-.code-linker-folder-rows:not(:empty) {
-  margin: 6px 0;
-}
-.code-linker-folder-row .setting-item-name {
-  font-family: var(--font-monospace);
-  font-size: var(--font-ui-smaller);
-  overflow-wrap: anywhere;
-}
-.code-linker-folder-add {
-  display: flex;
-  gap: 8px;
-  margin: 6px 0 18px 1.5em;
-}
-.code-linker-folder-input {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.code-linker-folder-addbtn {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-.code-linker-folder-addbtn svg {
-  width: 16px;
-  height: 16px;
+.code-linker-embed-broken {
+  color: var(--code-linker-broken-color, var(--text-error));
 }
 
 /* Update preview: each note is a checkable group, its link changes a compact table, and
@@ -299,78 +458,6 @@ settings:
   display: flex;
   align-items: center;
   gap: 6px;
-}
-.code-linker-preview-file {
-  font-weight: var(--font-semibold);
-  margin: 12px 0 4px;
-  overflow-wrap: anywhere;
-}
-.code-linker-preview-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--font-ui-small);
-}
-.code-linker-preview-table td {
-  border-bottom: 1px solid var(--background-modifier-border);
-  padding: 3px 8px;
-  text-align: left;
-  vertical-align: top;
-}
-.code-linker-preview-pick {
-  width: 1%;
-  padding-right: 0;
-  vertical-align: middle;
-}
-.code-linker-preview-move {
-  font-family: var(--font-monospace);
-  white-space: nowrap;
-  width: 1%;
-  color: var(--text-muted);
-}
-/* A guessed move (file matched by symbol or basename), not a plain line drift — tinted so
-   it stands out for a closer look before applying. */
-.code-linker-preview-moved .code-linker-preview-move {
-  color: var(--code-linker-stale-color, var(--text-warning));
-  white-space: normal;
-}
-.code-linker-preview-more,
-.code-linker-preview-empty {
-  color: var(--text-muted);
-  padding: 8px 0;
-}
-.code-linker-preview-attention {
-  color: var(--code-linker-broken-color, var(--text-error));
-}
-.code-linker-preview-broken {
-  font-size: var(--font-ui-small);
-  color: var(--code-linker-broken-color, var(--text-error));
-  padding: 2px 8px;
-  overflow-wrap: anywhere;
-}
-.code-linker-preview-buttons {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 16px;
-}
-
-/* Priority order among the installed linker plugins. Our own row is the movable one, so
-   it is the one that reads as active; the others are context. */
-.code-precedence-list {
-  margin: 0 0 18px 1.5em;
-}
-.code-precedence-list .setting-item {
-  border-top: none;
-  /* Padding matches the folder-list rows, so this nested list lines up with the other
-     one in the same pane: text off the left edge, arrows level with the remove buttons. */
-  padding: 4px 6px 4px 0.75em;
-}
-.code-precedence-list .setting-item-name {
-  color: var(--text-muted);
-}
-.code-precedence-self .setting-item-name {
-  color: var(--text-normal);
-  font-weight: var(--font-semibold);
 }
 
 /* Code Linker 1.3.5 */

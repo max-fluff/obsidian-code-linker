@@ -349,7 +349,7 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       app: this.app,
       provider: this.plugin.api && this.plugin.api.linker,
       Setting,
-      cls: 'code',
+      cls: 'code-linker',
       name: t('set.precedence.name'),
       desc: t('set.precedence.desc'),
       otherDesc: t('set.precedence.other'),

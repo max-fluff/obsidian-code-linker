@@ -49,12 +49,13 @@ const { registerEmbed, parseSpec, splitPathRange, resolvePath } = require('./emb
 const actualize = require('./actualize');
 const { CodeLinkModal, PresetPickerModal, LinePromptModal, PinAnchorModal } = require('./modal');
 const { CodeLinkerSettingTab } = require('./settings-tab');
-const { initI18n, t, plural } = require('./shared/i18n');
+const { initI18n, withFamily, t, plural } = require('./shared/i18n');
 const api = require('./api');
+const indexEvents = require('./shared/index-events');
 
 class CodeLinkerPlugin extends Plugin {
   async onload() {
-    initI18n({ en: require('./locales/en'), ru: require('./locales/ru') });
+    initI18n(withFamily('sigil', { en: require('./locales/en'), ru: require('./locales/ru') }));
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.setIndex([]);
     this.languages = [];
@@ -1562,7 +1563,7 @@ class CodeLinkerPlugin extends Plugin {
   }
 }
 
-Object.assign(CodeLinkerPlugin.prototype, api);
+Object.assign(CodeLinkerPlugin.prototype, api, indexEvents);
 Object.assign(CodeLinkerPlugin.prototype, actualize.methods);
 
 module.exports = CodeLinkerPlugin;
