@@ -245,6 +245,13 @@ Each enabled language lists the entity kinds it actually put in the index (e.g. 
 - **Pin unpinned code links and embeds in this note** / **…in the whole vault** — catch up notes written before pinning existed.
 - **Rebuild code index**.
 
+
+### Priority among linker plugins
+
+Install more than one linker and they will sometimes claim the same word or the same link. It goes to whichever sits highest in **Settings → Maintenance → Priority among linker plugins**, and the loser stands aside — no double highlight, one entry in the right-click menu, one merged list of suggestions while you type.
+
+The list appears only when another linker is installed. Each plugin moves itself, so reordering may take a move from more than one settings tab; every arrangement is reachable that way.
+
 The selection commands and the link actions are also in the editor's right-click menu — see [Selection commands and the context menu](#selection-commands-and-the-context-menu).
 
 ## Settings
@@ -396,7 +403,7 @@ In an existing clone without the submodule, run `git submodule update --init` fi
 - `api.js` — the public API mixed into the plugin prototype.
 - `constants.js` — defaults and URI presets.
 - `git.js` — reads `.git` to resolve a file's remote/commit/branch for the permalink presets.
-- `shared/` — git submodule shared with the sibling linker plugins: markdown helpers, the i18n engine, and the folder-list settings editor.
+- `shared/` — git submodule shared with the sibling linker plugins: the interop layer that decides which plugin owns a contested link, the deep-link grammar, markdown helpers, the i18n engine, shared styles and the test harness. See [`src/shared/README.md`](src/shared/README.md).
 - `locales/` — interface strings (English and Russian), fed to the shared i18n engine.
 
 To deploy into a test vault on each build, create `esbuild.local.mjs` exporting `deployTargets` (a list of plugin folders to copy the build into). `node_modules/`, `package-lock.json` and `esbuild.local.mjs` are git-ignored.
