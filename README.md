@@ -449,3 +449,7 @@ Also by the author — the rest of the linker family. Two of them autocomplete a
     <img src="docs/images/heading-linker-banner.svg" alt="Heading Linker — highlight words in any form, link them to headings" width="480">
   </a>
 </p>
+
+## License
+
+MIT, see [`LICENSE`](LICENSE).
