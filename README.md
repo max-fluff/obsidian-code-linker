@@ -426,10 +426,10 @@ Requires Obsidian 1.4.0 or newer. Desktop-only — the index is built by reading
 
 Also by the author — the rest of the linker family. Two of them autocomplete a name into a deep-link that lands on the exact spot; two highlight words already in your notes and link them.
 
-**[Reference Linker](https://github.com/max-fluff/obsidian-reference-linker)** — this plugin's document counterpart: autocompletes links to external documents (PDF, Office, images) and inserts a deep-link that opens them at the right page in an external viewer — a section on its page instead of a symbol on its line. Desktop-only. Not in the community catalog yet.
+**[Reference Linker](https://community.obsidian.md/plugins/reference-linker)** — this plugin's document counterpart: autocompletes links to external documents (PDF, Office, images) and inserts a deep-link that opens them at the right page in an external viewer — a section on its page instead of a symbol on its line. Desktop-only.
 
 <p align="center">
-  <a href="https://github.com/max-fluff/obsidian-reference-linker">
+  <a href="https://community.obsidian.md/plugins/reference-linker">
     <img src="docs/images/reference-linker-banner.svg" alt="Reference Linker — autocomplete document references, jump to the exact page" width="480">
   </a>
 </p>
@@ -442,10 +442,10 @@ Also by the author — the rest of the linker family. Two of them autocomplete a
   </a>
 </p>
 
-**[Heading Linker](https://github.com/max-fluff/obsidian-heading-linker)** — the file-based sibling of Glossary Linker: each heading inside a chosen file is a term, matched in any word form and turned into a link. Works on desktop and mobile. Not in the community catalog yet.
+**[Heading Linker](https://community.obsidian.md/plugins/heading-linker)** — the file-based sibling of Glossary Linker: each heading inside a chosen file is a term, matched in any word form and turned into a link. Works on desktop and mobile.
 
 <p align="center">
-  <a href="https://github.com/max-fluff/obsidian-heading-linker">
+  <a href="https://community.obsidian.md/plugins/heading-linker">
     <img src="docs/images/heading-linker-banner.svg" alt="Heading Linker — highlight words in any form, link them to headings" width="480">
   </a>
 </p>
