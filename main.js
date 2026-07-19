@@ -138,14 +138,13 @@ var require_constants = __commonJS({
     "use strict";
     var { splitLines: splitLines2 } = require_markdown();
     var PRESETS2 = {
-      // {root} keeps the note portable: the file holds a relative path, the absolute
-      // code root is filled in on render/click (same mechanism as the file preset).
-      vscode: "vscode://file/{root}/{path}:{line}",
+      // {code-root} keeps the note portable: the file holds a relative path, the absolute code
+      // root is filled in on render/click. Namespaced, so a link says which linker owns it —
+      // the bare {root} it replaces was filled by the reference linker too.
+      vscode: "vscode://file/{code-root}/{path}:{line}",
       // {jetbrainsProduct} resolves to the chosen JetBrains IDE (the "JetBrains IDE" setting).
       jetbrains: "jetbrains://{jetbrainsProduct}/navigate/reference?project={project}&path={path}:{line}",
-      // {root} is left in the note and resolved to the absolute code root on click,
-      // so the link text stays portable across machines.
-      file: "file:///{root}/{path}",
+      file: "file:///{code-root}/{path}",
       // Web permalinks: {gitRemote}/{gitSha} come from the file's git repo at insert time,
       // pinning the link to that exact commit. GitLab serves blobs under /-/blob.
       github: "{gitRemote}/blob/{gitSha}/{path}#L{line}",
@@ -375,7 +374,7 @@ var require_root_token = __commonJS({
         out = out.replace(tokenRe(LEGACY_TOKEN), root);
       return out;
     }
-    function namespaceRoot(url, owner) {
+    function namespaceRoot2(url, owner) {
       const s = String(url == null ? "" : url);
       if (!owner || !OWNER_TOKENS[owner])
         return s;
@@ -383,7 +382,7 @@ var require_root_token = __commonJS({
         return s;
       return s.replace(tokenRe(LEGACY_TOKEN), "{" + OWNER_TOKENS[owner] + "}");
     }
-    module2.exports = { OWNER_TOKENS, LEGACY_TOKEN, rootTokenIn, ownsRootToken: ownsRootToken2, fillRoot, namespaceRoot };
+    module2.exports = { OWNER_TOKENS, LEGACY_TOKEN, rootTokenIn, ownsRootToken: ownsRootToken2, fillRoot, namespaceRoot: namespaceRoot2 };
   }
 });
 
@@ -3609,7 +3608,7 @@ var nodePath = require("path");
 var { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, parseSkip, underSkip, pathInTarget } = require_constants();
 var { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require_markdown();
 var { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require_binding();
-var { fillRoot: fillRootToken, ownsRootToken } = require_root_token();
+var { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require_root_token();
 var { menuSection, sharedSection } = require_menu();
 var { peersOffering } = require_discover();
 var { ownsLink } = require_link_owner();
@@ -3761,6 +3760,9 @@ var CodeLinkerPlugin = class extends Plugin {
     if (this.settings.uriTemplate === "jetbrains://{product}/navigate/reference?project={project}&path={path}:{line}") {
       this.settings.uriTemplate = PRESETS.jetbrains;
     }
+    this.settings.uriTemplate = namespaceRoot(this.settings.uriTemplate, OWNER);
+    for (const e of this.settings.editors || [])
+      e.template = namespaceRoot(e.template, OWNER);
     const tpl = this.settings.uriTemplate;
     const editors = this.settings.editors || (this.settings.editors = []);
     const known = Object.values(PRESETS).includes(tpl) || editors.some((e) => e.template === tpl);

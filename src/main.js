@@ -18,7 +18,7 @@ const nodePath = require('path');
 const { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, parseSkip, underSkip, pathInTarget } = require('./constants');
 const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
 const { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require('./shared/binding');
-const { fillRoot: fillRootToken, ownsRootToken } = require('./shared/root-token');
+const { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require('./shared/root-token');
 const { menuSection, sharedSection } = require('./shared/menu');
 const { peersOffering } = require('./shared/discover');
 const { ownsLink } = require('./shared/link-owner');
@@ -214,6 +214,14 @@ class CodeLinkerPlugin extends Plugin {
     if (this.settings.uriTemplate === 'jetbrains://{product}/navigate/reference?project={project}&path={path}:{line}') {
       this.settings.uriTemplate = PRESETS.jetbrains;
     }
+    // {root} became {code-root} so a link says whose it is. Templates are our own setting,
+    // so a {root} in one can only ever have meant our root — rewriting it is safe, and it
+    // has to happen before the preset check below or a migrated preset would be filed as
+    // "Custom". Notes already written keep their bare {root}: it still resolves, and
+    // rewriting someone's vault is not a migration anyone asked for.
+    this.settings.uriTemplate = namespaceRoot(this.settings.uriTemplate, OWNER);
+    for (const e of this.settings.editors || []) e.template = namespaceRoot(e.template, OWNER);
+
     // The "Custom" preset is gone; preserve a custom template as a named editor so it stays selectable.
     const tpl = this.settings.uriTemplate;
     const editors = this.settings.editors || (this.settings.editors = []);

@@ -3,14 +3,13 @@
 const { splitLines } = require('./shared/markdown');
 
 const PRESETS = {
-  // {root} keeps the note portable: the file holds a relative path, the absolute
-  // code root is filled in on render/click (same mechanism as the file preset).
-  vscode: 'vscode://file/{root}/{path}:{line}',
+  // {code-root} keeps the note portable: the file holds a relative path, the absolute code
+  // root is filled in on render/click. Namespaced, so a link says which linker owns it —
+  // the bare {root} it replaces was filled by the reference linker too.
+  vscode: 'vscode://file/{code-root}/{path}:{line}',
   // {jetbrainsProduct} resolves to the chosen JetBrains IDE (the "JetBrains IDE" setting).
   jetbrains: 'jetbrains://{jetbrainsProduct}/navigate/reference?project={project}&path={path}:{line}',
-  // {root} is left in the note and resolved to the absolute code root on click,
-  // so the link text stays portable across machines.
-  file: 'file:///{root}/{path}',
+  file: 'file:///{code-root}/{path}',
   // Web permalinks: {gitRemote}/{gitSha} come from the file's git repo at insert time,
   // pinning the link to that exact commit. GitLab serves blobs under /-/blob.
   github: '{gitRemote}/blob/{gitSha}/{path}#L{line}',
