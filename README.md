@@ -262,6 +262,7 @@ The selection commands and the link actions are also in the editor's right-click
 | **Code root** | vault's parent folder | Base folder the scan paths resolve against. Empty = the folder containing the vault. |
 | **Scan folders** | whole code root | One path per line, relative to the code root. Folders that don't exist are flagged here and in a notice on rebuild. |
 | **Skip folders** | `obj`, `bin`, `.git`, `Library`, `Temp`, `node_modules` | One per line. A bare name (`node_modules`) is skipped at any depth; a path with a slash (`src/generated`) skips only that folder, relative to the code root. |
+| **Respect .gitignore** | on | Also skip paths a `.gitignore` excludes, so build output and vendored code stay out of the index without listing them by hand. Only appears once the scan has actually met a `.gitignore`. |
 | **Max file size (KB)** | `2048` | Files larger than this are indexed by name only, not parsed for declarations (`0` = no limit). |
 | **Auto-refresh index** | on | Watch the scan folders and rebuild when code changes. Recursive watching isn't supported on Linux — there, rebuild manually (the plugin says so when it can't watch). |
 
@@ -299,6 +300,8 @@ The selection commands and the link actions are also in the editor's right-click
 - a **path with a slash** (`projA/Source`) skips only that one folder, relative to the code root.
 
 So if you have two `Source` folders and want to ignore just one, list `projA/Source` — a bare `Source` would drop both.
+
+With **Respect .gitignore** on, a `.gitignore` prunes the scan too: files are read from each scan root downward (a `.gitignore` above the scan root isn't consulted), and negation (`!keep.log`), directory-only patterns (`build/`) and the `*`, `?`, `**` wildcards are honoured. It stacks with *Skip folders* rather than replacing it, so your own skip list still applies.
 
 ### Styling
 
