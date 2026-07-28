@@ -910,7 +910,7 @@ class CodeLinkerPlugin extends Plugin {
     // Update the status bar every 200th file, not every file, to spare layout.
     let seen = 0;
     const onFile = () => { if (++seen % 200 === 0) this.statusEl.setText(t('status.indexing', { n: seen })); };
-    const scan = { root, byExt, skip: parseSkip(this.settings.skipDirs), old, next: new Map(), onFile, gitignore: !!this.settings.useGitignore, ignores: [] };
+    const scan = { root, byExt, skip: parseSkip(this.settings.skipDirs), old, next: new Map(), onFile, gitignore: !!this.settings.useGitignore, ignores: [], sawGitignore: false };
     try {
       for (const r of roots) {
         await this.walk(nodePath.join(root, r), scan);
@@ -924,6 +924,7 @@ class CodeLinkerPlugin extends Plugin {
 
     this.fileCache = scan.next;
     this.cacheSignature = signature;
+    this.hasGitignore = scan.sawGitignore;
     this.setIndex(this.flattenCache());
     await this.saveCache();
     this.notifyIndexChange();
@@ -945,11 +946,16 @@ class CodeLinkerPlugin extends Plugin {
     // Stack this directory's .gitignore for the duration of its subtree, then unstack it —
     // the listing is already in hand, so a directory without one costs no extra syscall.
     const mark = scan.ignores.length;
-    if (scan.gitignore && items.some((it) => it.isFile() && it.name === '.gitignore')) {
-      let text = '';
-      try { text = await fsp.readFile(nodePath.join(absDir, '.gitignore'), 'utf8'); } catch { /* unreadable: no rules */ }
-      const base = nodePath.relative(scan.root, absDir).split(nodePath.sep).join('/');
-      for (const rule of compileGitignore(text, base)) scan.ignores.push(rule);
+    // Note a .gitignore even when the setting is off, so the setting can reveal itself only
+    // where there is one to respect; only compile rules when it is on.
+    if (items.some((it) => it.isFile() && it.name === '.gitignore')) {
+      scan.sawGitignore = true;
+      if (scan.gitignore) {
+        let text = '';
+        try { text = await fsp.readFile(nodePath.join(absDir, '.gitignore'), 'utf8'); } catch { /* unreadable: no rules */ }
+        const base = nodePath.relative(scan.root, absDir).split(nodePath.sep).join('/');
+        for (const rule of compileGitignore(text, base)) scan.ignores.push(rule);
+      }
     }
     for (const it of items) {
       const abs = nodePath.join(absDir, it.name);

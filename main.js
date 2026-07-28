@@ -3463,11 +3463,13 @@ var require_settings_tab = __commonJS({
           containerEl.createEl("div", { cls: "code-linker-note is-error", text: t2("set.scanFolders.notFound", { folders: missing.join(", ") }) });
         }
         folderList(t2("set.skipFolders.name"), t2("set.skipFolders.desc"), "skipDirs");
-        new Setting(containerEl).setName(t2("set.gitignore.name")).setDesc(t2("set.gitignore.desc")).addToggle((c) => c.setValue(s.useGitignore).onChange(async (v) => {
-          s.useGitignore = v;
-          await save(false);
-          this.plugin.rebuildIndex(false);
-        }));
+        if (this.plugin.hasGitignore) {
+          new Setting(containerEl).setName(t2("set.gitignore.name")).setDesc(t2("set.gitignore.desc")).addToggle((c) => c.setValue(s.useGitignore).onChange(async (v) => {
+            s.useGitignore = v;
+            await save(false);
+            this.plugin.rebuildIndex(false);
+          }));
+        }
         new Setting(containerEl).setName(t2("set.maxFileSize.name")).setDesc(t2("set.maxFileSize.desc")).addText((c) => {
           c.inputEl.type = "number";
           c.setValue(String(s.maxFileSizeKb)).onChange(async (v) => {
@@ -5029,7 +5031,7 @@ var CodeLinkerPlugin = class extends Plugin {
       if (++seen % 200 === 0)
         this.statusEl.setText(t("status.indexing", { n: seen }));
     };
-    const scan = { root, byExt, skip: parseSkip(this.settings.skipDirs), old, next: /* @__PURE__ */ new Map(), onFile, gitignore: !!this.settings.useGitignore, ignores: [] };
+    const scan = { root, byExt, skip: parseSkip(this.settings.skipDirs), old, next: /* @__PURE__ */ new Map(), onFile, gitignore: !!this.settings.useGitignore, ignores: [], sawGitignore: false };
     try {
       for (const r of roots) {
         await this.walk(nodePath.join(root, r), scan);
@@ -5043,6 +5045,7 @@ var CodeLinkerPlugin = class extends Plugin {
     this.statusEl.setText("");
     this.fileCache = scan.next;
     this.cacheSignature = signature;
+    this.hasGitignore = scan.sawGitignore;
     this.setIndex(this.flattenCache());
     await this.saveCache();
     this.notifyIndexChange();
@@ -5063,15 +5066,18 @@ var CodeLinkerPlugin = class extends Plugin {
       return;
     }
     const mark = scan.ignores.length;
-    if (scan.gitignore && items.some((it) => it.isFile() && it.name === ".gitignore")) {
-      let text = "";
-      try {
-        text = await fsp.readFile(nodePath.join(absDir, ".gitignore"), "utf8");
-      } catch (e) {
+    if (items.some((it) => it.isFile() && it.name === ".gitignore")) {
+      scan.sawGitignore = true;
+      if (scan.gitignore) {
+        let text = "";
+        try {
+          text = await fsp.readFile(nodePath.join(absDir, ".gitignore"), "utf8");
+        } catch (e) {
+        }
+        const base = nodePath.relative(scan.root, absDir).split(nodePath.sep).join("/");
+        for (const rule of compileGitignore(text, base))
+          scan.ignores.push(rule);
       }
-      const base = nodePath.relative(scan.root, absDir).split(nodePath.sep).join("/");
-      for (const rule of compileGitignore(text, base))
-        scan.ignores.push(rule);
     }
     for (const it of items) {
       const abs = nodePath.join(absDir, it.name);
