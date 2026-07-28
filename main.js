@@ -299,9 +299,9 @@ var require_constants = __commonJS({
 var require_binding = __commonJS({
   "src/shared/binding.js"(exports2, module2) {
     "use strict";
-    var ANCHORS = { sym: "sym", kind: "kind", sec: "sec", line: "hash" };
-    var TOKEN = /^(sym|kind|sec|line):(.+)$/;
-    var OWNERS = { code: ["sym", "kind", "hash"], reference: ["sec"] };
+    var ANCHORS = { sym: "sym", kind: "kind", sec: "sec", cite: "cite", line: "hash" };
+    var TOKEN = /^(sym|kind|sec|cite|line):(.+)$/;
+    var OWNERS = { code: ["sym", "kind", "hash"], reference: ["sec", "cite"] };
     function ownerOf(binding) {
       if (!binding)
         return null;
@@ -327,14 +327,14 @@ var require_binding = __commonJS({
       const s = String(title || "").trim();
       if (!s)
         return null;
-      const b = { sym: "", kind: "", sec: "", hash: "" };
+      const b = { sym: "", kind: "", sec: "", cite: "", hash: "" };
       for (const word of s.split(/\s+/)) {
         const m = TOKEN.exec(word);
         if (!m)
           return null;
         b[ANCHORS[m[1]]] = decodeValue(m[2]);
       }
-      return b.sym || b.kind || b.sec || b.hash ? b : null;
+      return b.sym || b.kind || b.sec || b.cite || b.hash ? b : null;
     }
     function formatBinding2(b) {
       const parts = [];
@@ -342,6 +342,8 @@ var require_binding = __commonJS({
         parts.push("sym:" + encodeValue(b.sym));
       if (b.kind)
         parts.push("kind:" + encodeValue(b.kind));
+      if (b.cite)
+        parts.push("cite:" + encodeValue(b.cite));
       if (b.sec)
         parts.push("sec:" + encodeValue(b.sec));
       if (b.hash)
@@ -2951,33 +2953,106 @@ var require_modal = __commonJS({
   }
 });
 
-// src/shared/deeplink/folder-suggest.js
-var require_folder_suggest = __commonJS({
-  "src/shared/deeplink/folder-suggest.js"(exports2, module2) {
+// src/shared/suggest-base.js
+var require_suggest_base = __commonJS({
+  "src/shared/suggest-base.js"(exports2, module2) {
     "use strict";
-    var obsidian = require("obsidian");
+    var { AbstractInputSuggest } = require("obsidian");
+    var PathSuggestBase = class extends AbstractInputSuggest {
+      constructor(app, inputEl, onSelect) {
+        super(app, inputEl);
+        this.app = app;
+        this.inputEl = inputEl;
+        this.onSelect = onSelect;
+      }
+      // A vault completer deals in TFile/TFolder, a disk one in plain paths.
+      pathOf(item) {
+        return typeof item === "string" ? item : item.path;
+      }
+      match(items, query, limit) {
+        const q = String(query == null ? "" : query).replace(/\\/g, "/").toLowerCase();
+        const hit = items.filter((i) => this.pathOf(i).toLowerCase().includes(q));
+        return limit ? hit.slice(0, limit) : hit;
+      }
+      renderSuggestion(item, el) {
+        el.setText(this.pathOf(item) || "/");
+      }
+      // onSelect clears the box instead of keeping the pick: the folder-list editor adds it as a
+      // row rather than binding the input to one value.
+      selectSuggestion(item) {
+        const path = this.pathOf(item);
+        if (this.onSelect) {
+          this.onSelect(path);
+          this.setValue("");
+          this.close();
+          return;
+        }
+        this.setValue(path);
+        this.inputEl.trigger("input");
+        this.close();
+      }
+    };
+    var suggestAvailable = () => typeof AbstractInputSuggest === "function";
+    var SUGGEST_LIMIT = 50;
+    module2.exports = { PathSuggestBase, suggestAvailable, SUGGEST_LIMIT };
+  }
+});
+
+// src/shared/deeplink/disk-suggest.js
+var require_disk_suggest = __commonJS({
+  "src/shared/deeplink/disk-suggest.js"(exports2, module2) {
+    "use strict";
     var fs2 = require("fs");
     var nodePath2 = require("path");
-    var { AbstractInputSuggest } = obsidian;
-    var FolderSuggest = class extends AbstractInputSuggest {
-      constructor(app, inputEl, getRoot, onSelect, getSeed) {
-        super(app, inputEl);
-        this.inputEl = inputEl;
-        this.getRoot = getRoot;
-        this.onSelect = onSelect;
-        this.getSeed = getSeed;
+    var { PathSuggestBase, suggestAvailable, SUGGEST_LIMIT } = require_suggest_base();
+    var DiskPathSuggest = class extends PathSuggestBase {
+      constructor(app, inputEl, opts) {
+        const o = opts || {};
+        super(app, inputEl, o.onSelect);
+        this.getRoot = o.getRoot;
+        this.getSeed = o.getSeed;
+        this.exts = o.exts && o.exts.length ? new Set(o.exts.map((e) => e.toLowerCase())) : null;
       }
-      // Immediate subdirectory names of an absolute dir, or [] if it can't be read.
-      subdirs(dir) {
+      entries(dir) {
         try {
           return fs2.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
         } catch (e) {
           return [];
         }
       }
+      // Every wanted file under `base`, root-relative. Walked once per completer and kept: the
+      // filtering runs per keystroke, and a document library is too big to re-read that often.
+      files(base) {
+        if (this.cache && this.cacheBase === base)
+          return this.cache;
+        const out = [];
+        const walk = (dir, rel) => {
+          let items = [];
+          try {
+            items = fs2.readdirSync(dir, { withFileTypes: true });
+          } catch (e) {
+            return;
+          }
+          for (const e of items) {
+            if (e.name[0] === ".")
+              continue;
+            const r = rel ? rel + "/" + e.name : e.name;
+            if (e.isDirectory())
+              walk(nodePath2.join(dir, e.name), r);
+            else if (this.exts.has(nodePath2.extname(e.name).toLowerCase()))
+              out.push(r);
+          }
+        };
+        walk(base, "");
+        this.cacheBase = base;
+        this.cache = out.sort();
+        return this.cache;
+      }
       getSuggestions(query) {
         const base = this.getRoot ? this.getRoot() : "";
-        const q = query.replace(/\\/g, "/");
+        if (this.exts)
+          return this.match(this.files(base), query, SUGGEST_LIMIT);
+        const q = String(query == null ? "" : query).replace(/\\/g, "/");
         const slash = q.lastIndexOf("/");
         const partial = (slash === -1 ? q : q.slice(slash + 1)).toLowerCase();
         const head = slash === -1 ? "" : q.slice(0, slash);
@@ -2995,25 +3070,10 @@ var require_folder_suggest = __commonJS({
         if (!scanDir)
           return [];
         const stem = prefix.replace(/\/+$/, "");
-        return this.subdirs(scanDir).filter((name) => name.toLowerCase().includes(partial)).map((name) => stem ? stem + "/" + name : name).sort().slice(0, 50);
-      }
-      renderSuggestion(path, el) {
-        el.setText(path);
-      }
-      selectSuggestion(path) {
-        if (this.onSelect) {
-          this.onSelect(path);
-          this.setValue("");
-          this.close();
-          return;
-        }
-        this.setValue(path);
-        this.inputEl.trigger("input");
-        this.close();
+        return this.entries(scanDir).filter((name) => name.toLowerCase().includes(partial)).map((name) => stem ? stem + "/" + name : name).sort().slice(0, SUGGEST_LIMIT);
       }
     };
-    var folderSuggestAvailable = () => typeof AbstractInputSuggest === "function";
-    module2.exports = { FolderSuggest, folderSuggestAvailable };
+    module2.exports = { DiskPathSuggest, suggestAvailable };
   }
 });
 
@@ -3196,7 +3256,7 @@ var require_settings_tab = __commonJS({
     "use strict";
     var { PluginSettingTab, Setting } = require("obsidian");
     var { PRESETS: PRESETS2, JETBRAINS_PRODUCTS: JETBRAINS_PRODUCTS2 } = require_constants();
-    var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest();
+    var { DiskPathSuggest, suggestAvailable } = require_disk_suggest();
     var { renderFolderList } = require_folder_list();
     var { t: t2, plural: plural2 } = require_i18n();
     var { renderPrecedenceSetting: precedenceSetting } = require_precedence();
@@ -3279,8 +3339,8 @@ var require_settings_tab = __commonJS({
             s.codeRoot = v.trim();
             await save(false);
           });
-          if (folderSuggestAvailable())
-            new FolderSuggest(this.app, c.inputEl, () => "", null, () => this.plugin.codeRoot());
+          if (suggestAvailable())
+            new DiskPathSuggest(this.app, c.inputEl, { getSeed: () => this.plugin.codeRoot() });
         });
         const folderList = (name, desc, key) => renderFolderList(containerEl, {
           cls: "code-linker",
@@ -3292,7 +3352,7 @@ var require_settings_tab = __commonJS({
             await save(false);
           },
           normalize: normFolder,
-          attachSuggest: folderSuggestAvailable() ? (inputEl, onPick) => new FolderSuggest(this.app, inputEl, () => this.plugin.codeRoot(), onPick) : null,
+          attachSuggest: suggestAvailable() ? (inputEl, onPick) => new DiskPathSuggest(this.app, inputEl, { getRoot: () => this.plugin.codeRoot(), onSelect: onPick }) : null,
           placeholder: t2("set.folderList.add"),
           removeLabel: t2("set.folderList.remove"),
           addLabel: t2("set.folderList.addAria")

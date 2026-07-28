@@ -2,7 +2,7 @@
 
 const { PluginSettingTab, Setting } = require('obsidian');
 const { PRESETS, JETBRAINS_PRODUCTS } = require('./constants');
-const { FolderSuggest, folderSuggestAvailable } = require('./shared/deeplink/folder-suggest');
+const { DiskPathSuggest, suggestAvailable } = require('./shared/deeplink/disk-suggest');
 const { renderFolderList } = require('./shared/folder-list');
 const { t, plural } = require('./shared/i18n');
 const { renderPrecedenceSetting: precedenceSetting } = require('./shared/precedence');
@@ -88,7 +88,7 @@ class CodeLinkerSettingTab extends PluginSettingTab {
         wide(c).setPlaceholder(this.plugin.codeRoot()).setValue(s.codeRoot).onChange(async (v) => { s.codeRoot = v.trim(); await save(false); });
         // Absolute-path completer seeded at the current default, so an empty field
         // still lists folders around the vault instead of nothing.
-        if (folderSuggestAvailable()) new FolderSuggest(this.app, c.inputEl, () => '', null, () => this.plugin.codeRoot());
+        if (suggestAvailable()) new DiskPathSuggest(this.app, c.inputEl, { getSeed: () => this.plugin.codeRoot() });
       });
 
     // Scan/skip paths are code-root-relative, so their autocomplete is rooted there.
@@ -99,8 +99,8 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       get: () => s[key],
       set: async (v) => { s[key] = v; await save(false); },
       normalize: normFolder,
-      attachSuggest: folderSuggestAvailable()
-        ? (inputEl, onPick) => new FolderSuggest(this.app, inputEl, () => this.plugin.codeRoot(), onPick)
+      attachSuggest: suggestAvailable()
+        ? (inputEl, onPick) => new DiskPathSuggest(this.app, inputEl, { getRoot: () => this.plugin.codeRoot(), onSelect: onPick })
         : null,
       placeholder: t('set.folderList.add'),
       removeLabel: t('set.folderList.remove'),
