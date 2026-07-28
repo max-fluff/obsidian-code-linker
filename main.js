@@ -200,6 +200,8 @@ var require_constants = __commonJS({
       // one path per line, relative to codeRoot
       skipDirs: "obj\nbin\n.git\nLibrary\nTemp\nnode_modules",
       // one folder name per line
+      useGitignore: true,
+      // also prune paths a .gitignore (from the scan root down) excludes
       editors: [],
       // user-defined editor presets, each { name, template }
       hiddenPresets: ["github", "gitlab"],
@@ -292,6 +294,104 @@ var require_constants = __commonJS({
       return false;
     }
     module2.exports = { PRESETS: PRESETS2, PRISM_LANG: PRISM_LANG2, JETBRAINS_PRODUCTS: JETBRAINS_PRODUCTS2, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, LANGUAGES_TEMPLATE: LANGUAGES_TEMPLATE2, parseSkip: parseSkip2, underSkip: underSkip2, pathInTarget: pathInTarget2 };
+  }
+});
+
+// src/gitignore.js
+var require_gitignore = __commonJS({
+  "src/gitignore.js"(exports2, module2) {
+    "use strict";
+    var RE_SPECIAL = new Set(".^$+{}()|\\");
+    function globToRegex(glob) {
+      let re = "";
+      for (let i = 0; i < glob.length; i++) {
+        const c = glob[i];
+        if (c === "*") {
+          if (glob[i + 1] === "*") {
+            i++;
+            if (glob[i + 1] === "/") {
+              re += "(?:.*/)?";
+              i++;
+            } else
+              re += ".*";
+          } else {
+            re += "[^/]*";
+          }
+        } else if (c === "?") {
+          re += "[^/]";
+        } else if (c === "[") {
+          let cls = "[";
+          i++;
+          if (glob[i] === "!") {
+            cls += "^";
+            i++;
+          }
+          while (i < glob.length && glob[i] !== "]") {
+            cls += glob[i] === "\\" ? "\\\\" : glob[i];
+            i++;
+          }
+          re += cls + "]";
+        } else {
+          re += RE_SPECIAL.has(c) ? "\\" + c : c;
+        }
+      }
+      return re;
+    }
+    function compileLine(raw, base) {
+      let line = raw.replace(/\r$/, "").replace(/\s+$/, "");
+      if (!line || line[0] === "#")
+        return null;
+      let negate = false;
+      if (line[0] === "!") {
+        negate = true;
+        line = line.slice(1);
+      }
+      if (line[0] === "\\" && (line[1] === "#" || line[1] === "!"))
+        line = line.slice(1);
+      let dirOnly = false;
+      if (line.endsWith("/")) {
+        dirOnly = true;
+        line = line.slice(0, -1);
+      }
+      if (!line)
+        return null;
+      const hadLeading = line[0] === "/";
+      const core = hadLeading ? line.slice(1) : line;
+      const anchored = hadLeading || core.includes("/");
+      const body = globToRegex(core);
+      const prefix = anchored ? "^" : "^(?:.*/)?";
+      return { negate, dirOnly, base, re: new RegExp(prefix + body + "$") };
+    }
+    function compileGitignore2(text, base) {
+      const rules = [];
+      for (const raw of String(text || "").split("\n")) {
+        const rule = compileLine(raw, base);
+        if (rule)
+          rules.push(rule);
+      }
+      return rules;
+    }
+    function relToBase(rel, base) {
+      if (!base)
+        return rel;
+      if (rel === base)
+        return "";
+      return rel.startsWith(base + "/") ? rel.slice(base.length + 1) : null;
+    }
+    function isIgnored2(rules, rel, isDir) {
+      let ignored = false;
+      for (const rule of rules) {
+        if (rule.dirOnly && !isDir)
+          continue;
+        const sub = relToBase(rel, rule.base);
+        if (sub === null || sub === "")
+          continue;
+        if (rule.re.test(sub))
+          ignored = !rule.negate;
+      }
+      return ignored;
+    }
+    module2.exports = { compileGitignore: compileGitignore2, isIgnored: isIgnored2 };
   }
 });
 
@@ -3363,6 +3463,11 @@ var require_settings_tab = __commonJS({
           containerEl.createEl("div", { cls: "code-linker-note is-error", text: t2("set.scanFolders.notFound", { folders: missing.join(", ") }) });
         }
         folderList(t2("set.skipFolders.name"), t2("set.skipFolders.desc"), "skipDirs");
+        new Setting(containerEl).setName(t2("set.gitignore.name")).setDesc(t2("set.gitignore.desc")).addToggle((c) => c.setValue(s.useGitignore).onChange(async (v) => {
+          s.useGitignore = v;
+          await save(false);
+          this.plugin.rebuildIndex(false);
+        }));
         new Setting(containerEl).setName(t2("set.maxFileSize.name")).setDesc(t2("set.maxFileSize.desc")).addText((c) => {
           c.inputEl.type = "number";
           c.setValue(String(s.maxFileSizeKb)).onChange(async (v) => {
@@ -3842,6 +3947,8 @@ var require_en = __commonJS({
       "set.maxFileSize.name": "Max file size (KB)",
       "set.maxFileSize.desc": "Files larger than this are indexed by name only, not parsed for declarations. 0 = no limit.",
       "set.skipFolders.desc": "A bare name (node_modules) is skipped at any depth; a path with a slash (src/generated) skips only that folder, relative to the code root.",
+      "set.gitignore.name": "Respect .gitignore",
+      "set.gitignore.desc": "Also skip paths a .gitignore excludes. Files are read from the scan root down (a .gitignore above it is not consulted); negation (!), directory-only (build/) and the *, ?, ** wildcards are honoured.",
       "set.rebuild.name": "Rebuild code index",
       "set.rebuild.desc": "Re-scan the source folders now.",
       // Settings — languages
@@ -3998,6 +4105,8 @@ var require_ru = __commonJS({
       "set.maxFileSize.name": "\u041C\u0430\u043A\u0441. \u0440\u0430\u0437\u043C\u0435\u0440 \u0444\u0430\u0439\u043B\u0430 (\u041A\u0411)",
       "set.maxFileSize.desc": "\u0424\u0430\u0439\u043B\u044B \u043A\u0440\u0443\u043F\u043D\u0435\u0435 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E \u0438\u043C\u0435\u043D\u0438, \u0431\u0435\u0437 \u0440\u0430\u0437\u0431\u043E\u0440\u0430 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u0439. 0 = \u0431\u0435\u0437 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u044F.",
       "set.skipFolders.desc": "\u041F\u0440\u043E\u0441\u0442\u043E \u0438\u043C\u044F (node_modules) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u043B\u044E\u0431\u043E\u0439 \u0433\u043B\u0443\u0431\u0438\u043D\u0435; \u043F\u0443\u0442\u044C \u0441\u043E \u0441\u043B\u044D\u0448\u0435\u043C (src/generated) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u0443 \u043F\u0430\u043F\u043A\u0443 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F \u043A\u043E\u0434\u0430.",
+      "set.gitignore.name": "\u0423\u0447\u0438\u0442\u044B\u0432\u0430\u0442\u044C .gitignore",
+      "set.gitignore.desc": "\u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u0438 \u043F\u0443\u0442\u0438, \u0438\u0441\u043A\u043B\u044E\u0447\u0451\u043D\u043D\u044B\u0435 .gitignore. \u0424\u0430\u0439\u043B\u044B \u0447\u0438\u0442\u0430\u044E\u0442\u0441\u044F \u043E\u0442 \u043A\u043E\u0440\u043D\u044F \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0432\u043D\u0438\u0437 (.gitignore \u0432\u044B\u0448\u0435 \u043D\u0435 \u0443\u0447\u0438\u0442\u044B\u0432\u0430\u0435\u0442\u0441\u044F); \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0430\u043D\u044B \u043E\u0442\u0440\u0438\u0446\u0430\u043D\u0438\u0435 (!), \u0442\u043E\u043B\u044C\u043A\u043E-\u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0438 (build/) \u0438 \u0448\u0430\u0431\u043B\u043E\u043D\u044B *, ?, **.",
       "set.rebuild.name": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043A\u043E\u0434\u0430",
       "set.rebuild.desc": "\u041F\u0435\u0440\u0435\u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0438\u0441\u0445\u043E\u0434\u043D\u044B\u0435 \u043F\u0430\u043F\u043A\u0438 \u0441\u0435\u0439\u0447\u0430\u0441.",
       // Settings — languages
@@ -4059,6 +4168,7 @@ var fsp = fs.promises;
 var readline = require("readline");
 var nodePath = require("path");
 var { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, parseSkip, underSkip, pathInTarget } = require_constants();
+var { compileGitignore, isIgnored } = require_gitignore();
 var { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require_markdown();
 var { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require_binding();
 var { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require_root_token();
@@ -4919,7 +5029,7 @@ var CodeLinkerPlugin = class extends Plugin {
       if (++seen % 200 === 0)
         this.statusEl.setText(t("status.indexing", { n: seen }));
     };
-    const scan = { root, byExt, skip: parseSkip(this.settings.skipDirs), old, next: /* @__PURE__ */ new Map(), onFile };
+    const scan = { root, byExt, skip: parseSkip(this.settings.skipDirs), old, next: /* @__PURE__ */ new Map(), onFile, gitignore: !!this.settings.useGitignore, ignores: [] };
     try {
       for (const r of roots) {
         await this.walk(nodePath.join(root, r), scan);
@@ -4952,18 +5062,35 @@ var CodeLinkerPlugin = class extends Plugin {
     } catch (e) {
       return;
     }
+    const mark = scan.ignores.length;
+    if (scan.gitignore && items.some((it) => it.isFile() && it.name === ".gitignore")) {
+      let text = "";
+      try {
+        text = await fsp.readFile(nodePath.join(absDir, ".gitignore"), "utf8");
+      } catch (e) {
+      }
+      const base = nodePath.relative(scan.root, absDir).split(nodePath.sep).join("/");
+      for (const rule of compileGitignore(text, base))
+        scan.ignores.push(rule);
+    }
     for (const it of items) {
       const abs = nodePath.join(absDir, it.name);
+      const rel = nodePath.relative(scan.root, abs).split(nodePath.sep).join("/");
       if (it.isDirectory()) {
-        const rel = nodePath.relative(scan.root, abs).split(nodePath.sep).join("/");
-        if (!underSkip(rel, scan.skip))
-          await this.walk(abs, scan);
+        if (underSkip(rel, scan.skip))
+          continue;
+        if (scan.gitignore && isIgnored(scan.ignores, rel, true))
+          continue;
+        await this.walk(abs, scan);
       } else if (it.isFile()) {
+        if (scan.gitignore && isIgnored(scan.ignores, rel, false))
+          continue;
         const langs = scan.byExt.get(nodePath.extname(it.name).toLowerCase());
         if (langs)
           await this.indexFile(abs, langs, scan);
       }
     }
+    scan.ignores.length = mark;
   }
   async indexFile(abs, langs, scan) {
     const rel = nodePath.relative(scan.root, abs).split(nodePath.sep).join("/");

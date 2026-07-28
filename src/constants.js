@@ -51,6 +51,7 @@ const DEFAULT_SETTINGS = {
   codeRoot: '', // empty => parent folder of the vault
   scanRoots: '', // one path per line, relative to codeRoot
   skipDirs: 'obj\nbin\n.git\nLibrary\nTemp\nnode_modules', // one folder name per line
+  useGitignore: true, // also prune paths a .gitignore (from the scan root down) excludes
   editors: [], // user-defined editor presets, each { name, template }
   hiddenPresets: ['github', 'gitlab'], // presets kept out of the pickers; revealed on first run if the remote matches
   presetsInitialized: false, // whether the one-time preset reveal has run

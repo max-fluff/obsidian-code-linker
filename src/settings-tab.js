@@ -114,6 +114,11 @@ class CodeLinkerSettingTab extends PluginSettingTab {
     }
     folderList(t('set.skipFolders.name'), t('set.skipFolders.desc'), 'skipDirs');
 
+    new Setting(containerEl)
+      .setName(t('set.gitignore.name'))
+      .setDesc(t('set.gitignore.desc'))
+      .addToggle((c) => c.setValue(s.useGitignore).onChange(async (v) => { s.useGitignore = v; await save(false); this.plugin.rebuildIndex(false); }));
+
     new Setting(containerEl).setName(t('set.maxFileSize.name')).setDesc(t('set.maxFileSize.desc')).addText((c) => {
       c.inputEl.type = 'number';
       // Persist per keystroke, but rebuild once on blur — changing the limit

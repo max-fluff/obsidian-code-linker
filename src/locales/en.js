@@ -113,6 +113,8 @@ module.exports = {
   'set.maxFileSize.name': 'Max file size (KB)',
   'set.maxFileSize.desc': 'Files larger than this are indexed by name only, not parsed for declarations. 0 = no limit.',
   'set.skipFolders.desc': 'A bare name (node_modules) is skipped at any depth; a path with a slash (src/generated) skips only that folder, relative to the code root.',
+  'set.gitignore.name': 'Respect .gitignore',
+  'set.gitignore.desc': 'Also skip paths a .gitignore excludes. Files are read from the scan root down (a .gitignore above it is not consulted); negation (!), directory-only (build/) and the *, ?, ** wildcards are honoured.',
   'set.rebuild.name': 'Rebuild code index',
   'set.rebuild.desc': 'Re-scan the source folders now.',
 

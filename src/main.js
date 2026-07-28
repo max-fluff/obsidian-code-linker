@@ -16,6 +16,7 @@ const readline = require('readline');
 const nodePath = require('path');
 
 const { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, parseSkip, underSkip, pathInTarget } = require('./constants');
+const { compileGitignore, isIgnored } = require('./gitignore');
 const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
 const { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require('./shared/binding');
 const { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require('./shared/root-token');
@@ -909,7 +910,7 @@ class CodeLinkerPlugin extends Plugin {
     // Update the status bar every 200th file, not every file, to spare layout.
     let seen = 0;
     const onFile = () => { if (++seen % 200 === 0) this.statusEl.setText(t('status.indexing', { n: seen })); };
-    const scan = { root, byExt, skip: parseSkip(this.settings.skipDirs), old, next: new Map(), onFile };
+    const scan = { root, byExt, skip: parseSkip(this.settings.skipDirs), old, next: new Map(), onFile, gitignore: !!this.settings.useGitignore, ignores: [] };
     try {
       for (const r of roots) {
         await this.walk(nodePath.join(root, r), scan);
@@ -941,16 +942,29 @@ class CodeLinkerPlugin extends Plugin {
     } catch {
       return;
     }
+    // Stack this directory's .gitignore for the duration of its subtree, then unstack it —
+    // the listing is already in hand, so a directory without one costs no extra syscall.
+    const mark = scan.ignores.length;
+    if (scan.gitignore && items.some((it) => it.isFile() && it.name === '.gitignore')) {
+      let text = '';
+      try { text = await fsp.readFile(nodePath.join(absDir, '.gitignore'), 'utf8'); } catch { /* unreadable: no rules */ }
+      const base = nodePath.relative(scan.root, absDir).split(nodePath.sep).join('/');
+      for (const rule of compileGitignore(text, base)) scan.ignores.push(rule);
+    }
     for (const it of items) {
       const abs = nodePath.join(absDir, it.name);
+      const rel = nodePath.relative(scan.root, abs).split(nodePath.sep).join('/');
       if (it.isDirectory()) {
-        const rel = nodePath.relative(scan.root, abs).split(nodePath.sep).join('/');
-        if (!underSkip(rel, scan.skip)) await this.walk(abs, scan);
+        if (underSkip(rel, scan.skip)) continue;
+        if (scan.gitignore && isIgnored(scan.ignores, rel, true)) continue;
+        await this.walk(abs, scan);
       } else if (it.isFile()) {
+        if (scan.gitignore && isIgnored(scan.ignores, rel, false)) continue;
         const langs = scan.byExt.get(nodePath.extname(it.name).toLowerCase());
         if (langs) await this.indexFile(abs, langs, scan);
       }
     }
+    scan.ignores.length = mark;
   }
 
   async indexFile(abs, langs, scan) {
