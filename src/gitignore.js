@@ -1,10 +1,8 @@
 'use strict';
 
 // A subset of .gitignore matching, enough to prune a source scan: bare names, anchored
-// paths, directory-only patterns, negation, and the *, ?, ** wildcards. Compilation is
-// pure — the walk reads the files and stacks the rules; `base` is a rule's code-root-
-// relative directory (the scan root is ''). Rules stack shallow-first and the last match
-// wins, so a deep `!keep.log` overrides a parent `*.log` exactly as git resolves it.
+// paths, directory-only patterns, negation, and the *, ?, ** wildcards. Rules carry the
+// base directory of the file they came from (the scan root is ''); the walk stacks them.
 
 const RE_SPECIAL = new Set('.^$+{}()|\\');
 
