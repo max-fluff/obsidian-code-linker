@@ -3783,6 +3783,7 @@ var require_en = __commonJS({
       "notice.bound": "Code Linker: link pinned to line {line}",
       "notice.unbound": "Code Linker: link unpinned \u2014 it is no longer tracked",
       "notice.cantBind": "Code Linker: can't pin \u2014 the link doesn't point at a line of an indexed file",
+      "notice.embedMoved": "Code Linker: the note changed since this embed was drawn \u2014 nothing was written; refresh it and try again",
       "notice.noGit": "Code Linker: no git repository (with a remote) found for this file",
       "notice.editorSet": "Code Linker: links now open in {name}",
       "notice.noSelection": "Code Linker: select a name or path first",
@@ -3938,6 +3939,7 @@ var require_ru = __commonJS({
       "notice.bound": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0430 \u0437\u0430 \u0441\u0442\u0440\u043E\u043A\u043E\u0439 {line}",
       "notice.unbound": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u043E\u0442\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0430 \u2014 \u0431\u043E\u043B\u044C\u0448\u0435 \u043D\u0435 \u043E\u0442\u0441\u043B\u0435\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044F",
       "notice.cantBind": "Code Linker: \u043D\u0435 \u0437\u0430 \u0447\u0442\u043E \u0437\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u2014 \u0441\u0441\u044B\u043B\u043A\u0430 \u043D\u0435 \u0432\u0435\u0434\u0451\u0442 \u043D\u0430 \u0441\u0442\u0440\u043E\u043A\u0443 \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430",
+      "notice.embedMoved": "Code Linker: \u0437\u0430\u043C\u0435\u0442\u043A\u0430 \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u0430\u0441\u044C \u0441 \u043C\u043E\u043C\u0435\u043D\u0442\u0430 \u043E\u0442\u0440\u0438\u0441\u043E\u0432\u043A\u0438 \u0431\u043B\u043E\u043A\u0430 \u2014 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0437\u0430\u043F\u0438\u0441\u0430\u043D\u043E; \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u0435 \u0435\u0433\u043E \u0438 \u043F\u043E\u0432\u0442\u043E\u0440\u0438\u0442\u0435",
       "notice.noGit": "Code Linker: \u0434\u043B\u044F \u044D\u0442\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D git-\u0440\u0435\u043F\u043E\u0437\u0438\u0442\u043E\u0440\u0438\u0439 \u0441 remote",
       "notice.editorSet": "Code Linker: \u0441\u0441\u044B\u043B\u043A\u0438 \u0442\u0435\u043F\u0435\u0440\u044C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432 {name}",
       "notice.noSelection": "Code Linker: \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u044B\u0434\u0435\u043B\u0438\u0442\u0435 \u0438\u043C\u044F \u0438\u043B\u0438 \u043F\u0443\u0442\u044C",
@@ -5424,7 +5426,7 @@ var CodeLinkerPlugin = class extends Plugin {
   // in reading view there's none, so the file is rewritten through the vault.
   async writeEmbedBody(sourcePath, info, body) {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    const editor = view && view.editor;
+    const editor = view && view.file && view.file.path === sourcePath ? view.editor : null;
     if (editor) {
       editor.replaceRange(body.join("\n") + "\n", { line: info.lineStart + 1, ch: 0 }, { line: info.lineEnd, ch: 0 });
       return;
@@ -5434,9 +5436,19 @@ var CodeLinkerPlugin = class extends Plugin {
       new Notice(t("notice.cantBind"));
       return;
     }
-    const lines = (await this.app.vault.read(file)).split("\n");
-    lines.splice(info.lineStart + 1, info.lineEnd - info.lineStart - 1, ...body);
-    await this.app.vault.modify(file, lines.join("\n"));
+    let moved = false;
+    await this.app.vault.process(file, (data) => {
+      const lines = data.split("\n");
+      const fence = lines.slice(info.lineStart, info.lineEnd + 1).join("\n");
+      if (fence !== info.text.split("\n").slice(info.lineStart, info.lineEnd + 1).join("\n")) {
+        moved = true;
+        return data;
+      }
+      lines.splice(info.lineStart + 1, info.lineEnd - info.lineStart - 1, ...body);
+      return lines.join("\n");
+    });
+    if (moved)
+      new Notice(t("notice.embedMoved"));
   }
   pinLink(editor, link, anchor) {
     const p = this.linkPinOption(link, anchor);

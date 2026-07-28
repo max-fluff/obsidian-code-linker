@@ -49,6 +49,7 @@ module.exports = {
   'notice.bound': 'Code Linker: link pinned to line {line}',
   'notice.unbound': 'Code Linker: link unpinned — it is no longer tracked',
   'notice.cantBind': "Code Linker: can't pin — the link doesn't point at a line of an indexed file",
+  'notice.embedMoved': 'Code Linker: the note changed since this embed was drawn — nothing was written; refresh it and try again',
   'notice.noGit': 'Code Linker: no git repository (with a remote) found for this file',
   'notice.editorSet': 'Code Linker: links now open in {name}',
   'notice.noSelection': 'Code Linker: select a name or path first',

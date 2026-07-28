@@ -45,6 +45,7 @@ module.exports = {
   'notice.bound': 'Code Linker: ссылка закреплена за строкой {line}',
   'notice.unbound': 'Code Linker: ссылка откреплена — больше не отслеживается',
   'notice.cantBind': 'Code Linker: не за что закрепить — ссылка не ведёт на строку проиндексированного файла',
+  'notice.embedMoved': 'Code Linker: заметка изменилась с момента отрисовки блока — ничего не записано; обновите его и повторите',
   'notice.noGit': 'Code Linker: для этого файла не найден git-репозиторий с remote',
   'notice.editorSet': 'Code Linker: ссылки теперь открываются в {name}',
   'notice.noSelection': 'Code Linker: сначала выделите имя или путь',
