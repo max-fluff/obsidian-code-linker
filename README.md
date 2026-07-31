@@ -264,7 +264,7 @@ The selection commands and the link actions are also in the editor's right-click
 | **Skip folders** | `obj`, `bin`, `.git`, `Library`, `Temp`, `node_modules` | One per line. A bare name (`node_modules`) is skipped at any depth; a path with a slash (`src/generated`) skips only that folder, relative to the code root. |
 | **Respect .gitignore** | on | Also skip paths a `.gitignore` excludes, so build output and vendored code stay out of the index without listing them by hand. Only appears once the scan has actually met a `.gitignore`. |
 | **Max file size (KB)** | `2048` | Files larger than this are indexed by name only, not parsed for declarations (`0` = no limit). |
-| **Auto-refresh index** | on | Watch the scan folders and rebuild when code changes. Recursive watching isn't supported on Linux — there, rebuild manually (the plugin says so when it can't watch). |
+| **Auto-refresh index** | on | Watch the scan folders and rebuild when code changes. Linux has no recursive watch, so there the plugin falls back to watching each directory of the tree (adding new ones as they appear); a very large or deep tree can exhaust the OS watch limit, and the plugin says so if it does. |
 
 **Suggestions**
 | Setting | Default | What it does |
@@ -423,7 +423,7 @@ This plugin is desktop-only (it reads the filesystem).
 
 ## Compatibility
 
-Requires Obsidian 1.4.0 or newer. Desktop-only — the index is built by reading the filesystem through Node's API, which isn't available on mobile. On Linux, **Auto-refresh index** isn't available (it relies on recursive `fs.watch`, which Linux doesn't support) — rebuild the index manually there; everything else works. Interface in English and Russian, following Obsidian's language.
+Requires Obsidian 1.4.0 or newer. Desktop-only — the index is built by reading the filesystem through Node's API, which isn't available on mobile. On Linux, where Node has no recursive `fs.watch`, **Auto-refresh index** falls back to watching each directory of the scan tree; it works, but a very large or deep tree can hit the OS watch limit (the plugin says so, and a manual rebuild always works). Interface in English and Russian, following Obsidian's language.
 
 ## Related plugins
 

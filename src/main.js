@@ -17,6 +17,7 @@ const nodePath = require('path');
 
 const { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, parseSkip, underSkip, pathInTarget } = require('./constants');
 const { compileGitignore, isIgnored } = require('./gitignore');
+const { watchTree } = require('./shared/fs-watch');
 const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
 const { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require('./shared/binding');
 const { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require('./shared/root-token');
@@ -62,7 +63,7 @@ class CodeLinkerPlugin extends Plugin {
     this.languages = [];
     this.languageErrors = [];
     this.customRaw = '';
-    this.watchers = [];
+    this.scanWatcher = null;
     this.fileCache = new Map();
     this.lineMaps = new Map(); // per-file line hashes, built on demand for line links
     this.cacheSignature = '';
@@ -723,42 +724,29 @@ class CodeLinkerPlugin extends Plugin {
     if (!this.settings.autoRefresh) return;
     const root = this.codeRoot();
     if (!root) return;
-    for (const r of this.scanFolders()) {
-      const dir = nodePath.join(root, r);
-      if (!fs.existsSync(dir)) continue;
-      try {
-        const w = fs.watch(dir, { recursive: true }, (_evt, filename) => this.onWatchEvent(r, filename));
-        this.watchers.push(w);
-      } catch (e) {
-        // Recursive watching isn't available on Linux — auto-refresh can't work there.
-        if (e && e.code === 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM') this.watchUnsupported = true;
-        /* else: transient FS issue; a manual rebuild re-arms the watchers */
-      }
-    }
-    if (this.watchUnsupported && !this.watchUnsupportedNotified) {
-      this.watchUnsupportedNotified = true;
-      new Notice(t('notice.watchUnsupported'));
-    }
+    const roots = this.scanFolders().map((r) => ({ dir: nodePath.join(root, r), rel: String(r || '').split('\\').join('/').replace(/\/+$/, '') }));
+    this.scanWatcher = watchTree(roots, {
+      onEvent: (rel, filename) => this.onWatchEvent(rel, filename),
+      // Recursive watching isn't available on Linux; the shared watcher falls back to
+      // per-directory watches and tells us so, so the notice fires once.
+      onUnsupported: () => {
+        this.watchUnsupported = true;
+        if (!this.watchUnsupportedNotified) { this.watchUnsupportedNotified = true; new Notice(t('notice.watchUnsupported')); }
+      },
+      // Keep the Linux fallback out of node_modules and the like — the same prune the scan makes.
+      shouldDescend: (rel) => !underSkip(rel, parseSkip(this.settings.skipDirs)),
+    });
   }
 
   stopWatchers() {
-    for (const w of this.watchers) {
-      try {
-        w.close();
-      } catch {
-        /* already closed */
-      }
-    }
-    this.watchers = [];
+    if (this.scanWatcher) { this.scanWatcher.close(); this.scanWatcher = null; }
   }
 
-  // Debounce a background rebuild on file changes. Skip-dir noise (node_modules)
-  // and files we don't index are dropped cheaply before scheduling. `r` is the scan
-  // root the event came from, so the path can be resolved relative to the code root.
-  onWatchEvent(r, filename) {
+  // Debounce a background rebuild on a scan-folder change. `rel` is the changed path relative
+  // to the code root; skip-dir noise (node_modules) and files we don't index are dropped
+  // cheaply before scheduling.
+  onWatchEvent(rel, filename) {
     if (filename) {
-      const base = (r || '').split('\\').join('/').replace(/\/+$/, '');
-      const rel = (base ? base + '/' : '') + String(filename).split('\\').join('/');
       if (underSkip(rel, parseSkip(this.settings.skipDirs))) return;
       const ext = nodePath.extname(rel).toLowerCase();
       if (ext && !this.watchedExts().has(ext)) return;

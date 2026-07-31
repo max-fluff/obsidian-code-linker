@@ -395,6 +395,96 @@ var require_gitignore = __commonJS({
   }
 });
 
+// src/shared/fs-watch.js
+var require_fs_watch = __commonJS({
+  "src/shared/fs-watch.js"(exports2, module2) {
+    "use strict";
+    var nodeFs = require("fs");
+    var nodePath2 = require("path");
+    var toPosix = (s) => String(s || "").split("\\").join("/");
+    var joinRel = (rel, name) => name ? rel ? rel + "/" + toPosix(name) : toPosix(name) : rel;
+    function watchTree2(roots, opts = {}) {
+      const { onEvent = () => {
+      }, onUnsupported, shouldDescend = () => true, fsImpl = nodeFs } = opts;
+      const watchers = [];
+      const watched = /* @__PURE__ */ new Set();
+      let noted = false;
+      const noteDegraded = () => {
+        if (!noted) {
+          noted = true;
+          if (onUnsupported)
+            onUnsupported();
+        }
+      };
+      const arm = (dir, cb) => {
+        try {
+          watchers.push(fsImpl.watch(dir, cb));
+          return true;
+        } catch (e) {
+          if (e && (e.code === "ENOSPC" || e.code === "EMFILE"))
+            noteDegraded();
+          return false;
+        }
+      };
+      const onDirEvent = (dir, rel, _evt, filename) => {
+        const childRel = joinRel(rel, filename);
+        onEvent(childRel, filename ? toPosix(filename) : "");
+        if (filename) {
+          const abs = nodePath2.join(dir, String(filename));
+          let st;
+          try {
+            st = fsImpl.statSync(abs);
+          } catch (e) {
+            st = null;
+          }
+          if (st && st.isDirectory())
+            watchSubtree(abs, childRel);
+        }
+      };
+      const watchSubtree = (dir, rel) => {
+        if (watched.has(dir) || !shouldDescend(rel))
+          return;
+        watched.add(dir);
+        arm(dir, (evt, filename) => onDirEvent(dir, rel, evt, filename));
+        let entries;
+        try {
+          entries = fsImpl.readdirSync(dir, { withFileTypes: true });
+        } catch (e) {
+          return;
+        }
+        for (const e of entries)
+          if (e.isDirectory())
+            watchSubtree(nodePath2.join(dir, e.name), joinRel(rel, e.name));
+      };
+      for (const { dir, rel } of roots) {
+        if (!fsImpl.existsSync(dir))
+          continue;
+        try {
+          watchers.push(fsImpl.watch(dir, { recursive: true }, (_evt, filename) => onEvent(joinRel(rel, filename), filename ? toPosix(filename) : "")));
+        } catch (e) {
+          if (e && e.code === "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM") {
+            noteDegraded();
+            watchSubtree(dir, rel);
+          }
+        }
+      }
+      return {
+        close() {
+          for (const w of watchers) {
+            try {
+              w.close();
+            } catch (e) {
+            }
+          }
+          watchers.length = 0;
+          watched.clear();
+        }
+      };
+    }
+    module2.exports = { watchTree: watchTree2, joinRel };
+  }
+});
+
 // src/shared/binding.js
 var require_binding = __commonJS({
   "src/shared/binding.js"(exports2, module2) {
@@ -4171,6 +4261,7 @@ var readline = require("readline");
 var nodePath = require("path");
 var { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPLATE, parseSkip, underSkip, pathInTarget } = require_constants();
 var { compileGitignore, isIgnored } = require_gitignore();
+var { watchTree } = require_fs_watch();
 var { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require_markdown();
 var { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require_binding();
 var { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require_root_token();
@@ -4203,7 +4294,7 @@ var CodeLinkerPlugin = class extends Plugin {
     this.languages = [];
     this.languageErrors = [];
     this.customRaw = "";
-    this.watchers = [];
+    this.scanWatcher = null;
     this.fileCache = /* @__PURE__ */ new Map();
     this.lineMaps = /* @__PURE__ */ new Map();
     this.cacheSignature = "";
@@ -4843,39 +4934,33 @@ var CodeLinkerPlugin = class extends Plugin {
     const root = this.codeRoot();
     if (!root)
       return;
-    for (const r of this.scanFolders()) {
-      const dir = nodePath.join(root, r);
-      if (!fs.existsSync(dir))
-        continue;
-      try {
-        const w = fs.watch(dir, { recursive: true }, (_evt, filename) => this.onWatchEvent(r, filename));
-        this.watchers.push(w);
-      } catch (e) {
-        if (e && e.code === "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM")
-          this.watchUnsupported = true;
-      }
-    }
-    if (this.watchUnsupported && !this.watchUnsupportedNotified) {
-      this.watchUnsupportedNotified = true;
-      new Notice(t("notice.watchUnsupported"));
-    }
+    const roots = this.scanFolders().map((r) => ({ dir: nodePath.join(root, r), rel: String(r || "").split("\\").join("/").replace(/\/+$/, "") }));
+    this.scanWatcher = watchTree(roots, {
+      onEvent: (rel, filename) => this.onWatchEvent(rel, filename),
+      // Recursive watching isn't available on Linux; the shared watcher falls back to
+      // per-directory watches and tells us so, so the notice fires once.
+      onUnsupported: () => {
+        this.watchUnsupported = true;
+        if (!this.watchUnsupportedNotified) {
+          this.watchUnsupportedNotified = true;
+          new Notice(t("notice.watchUnsupported"));
+        }
+      },
+      // Keep the Linux fallback out of node_modules and the like — the same prune the scan makes.
+      shouldDescend: (rel) => !underSkip(rel, parseSkip(this.settings.skipDirs))
+    });
   }
   stopWatchers() {
-    for (const w of this.watchers) {
-      try {
-        w.close();
-      } catch (e) {
-      }
+    if (this.scanWatcher) {
+      this.scanWatcher.close();
+      this.scanWatcher = null;
     }
-    this.watchers = [];
   }
-  // Debounce a background rebuild on file changes. Skip-dir noise (node_modules)
-  // and files we don't index are dropped cheaply before scheduling. `r` is the scan
-  // root the event came from, so the path can be resolved relative to the code root.
-  onWatchEvent(r, filename) {
+  // Debounce a background rebuild on a scan-folder change. `rel` is the changed path relative
+  // to the code root; skip-dir noise (node_modules) and files we don't index are dropped
+  // cheaply before scheduling.
+  onWatchEvent(rel, filename) {
     if (filename) {
-      const base = (r || "").split("\\").join("/").replace(/\/+$/, "");
-      const rel = (base ? base + "/" : "") + String(filename).split("\\").join("/");
       if (underSkip(rel, parseSkip(this.settings.skipDirs)))
         return;
       const ext = nodePath.extname(rel).toLowerCase();
