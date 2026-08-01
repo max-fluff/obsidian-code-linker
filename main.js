@@ -2433,7 +2433,6 @@ var require_embed_frame = __commonJS({
       return b;
     }
     var EmbedFrame = class extends obsidian.MarkdownRenderChild {
-      // `cls` is the plugin's class prefix, the same one its stylesheet is written against.
       constructor(containerEl, plugin, spec, ctx, cls) {
         super(containerEl);
         this.plugin = plugin;
@@ -2444,29 +2443,23 @@ var require_embed_frame = __commonJS({
         this.lastSig = null;
       }
       // --- what a plugin fills in ---------------------------------------------------------------
-      // The spec resolved to whatever renderBody needs, or { error } for an inline notice.
       resolve() {
         return { error: "embed-frame: resolve() not implemented" };
       }
-      // Everything this embed shows, as a string. Same string means nothing changed and the
-      // re-render is skipped; null means the answer isn't knowable, so never skip.
+      // Same string means nothing changed and the render is skipped; null means never skip.
       sig() {
         return null;
       }
       headerText() {
         return "";
       }
-      // Draw into `body`. False means nothing could be drawn — the frame shows its own notice.
       async renderBody() {
         return false;
       }
-      // Fill the plugin's own toolbar row, on every render: a control that reads the result of
-      // one stays current.
       tools() {
       }
       menuItems() {
       }
-      // The notice text for a target that resolved but could not be read.
       unreadable() {
         return "";
       }
@@ -2489,7 +2482,6 @@ var require_embed_frame = __commonJS({
           return;
         this.plugin.withFormat(this.plugin.settings.askOnInsert, (tpl) => this.plugin.openEntry(entry, tpl));
       }
-      // The right-click menu, and what ⋯ opens — see CONTRIBUTING.md on what a toolbar may carry.
       menu() {
         const menu = new obsidian.Menu();
         if (this.res.entry)
@@ -2517,8 +2509,7 @@ var require_embed_frame = __commonJS({
       button(parent, icon, label, onClick) {
         return toolButton(parent, this.cls, icon, label, onClick);
       }
-      // The header, the toolbar and the body, built once and kept: a plugin that holds state in
-      // its own controls loses it if the row is rebuilt under it.
+      // Built once and kept: a plugin holding state in its own controls loses it to a rebuild.
       frame() {
         if (this.chrome && this.chrome.body.parentElement === this.containerEl)
           return this.chrome;
@@ -2565,8 +2556,7 @@ var require_embed_frame = __commonJS({
         if (this.chrome)
           this.chrome.title.setText(text);
       }
-      // Rewrite this block's own lines in the note. `edit(body)` gets the block body, without the
-      // fences, and returns what it should become, or null to leave the note alone.
+      // `edit(body)` gets the block body without its fences, and returns null to write nothing.
       async writeBody(edit) {
         const info = this.ctx && this.ctx.getSectionInfo && this.ctx.getSectionInfo(this.containerEl);
         if (!info)
@@ -2594,8 +2584,9 @@ var require_embed = __commonJS({
     var EMBED_LANG = "code-link";
     var MAX_EMBED_LINES = 400;
     var MORE_STEP = 10;
-    var SPEC_KEYS = ["context", "lines", "title", "bind"];
+    var SPEC_KEYS = ["context", "lines", "title", "bind", "numbers"];
     var parseSpec2 = (source) => frame.parseSpec(source, SPEC_KEYS);
+    var numbered = (spec) => !/^(off|no|false|hide|none)$/i.test((spec.numbers || "").trim());
     var baseName = (p) => nodePath2.basename(p).replace(/\.[^.]+$/, "");
     var intOr = (v, def) => {
       const n = parseInt(v, 10);
@@ -2708,16 +2699,12 @@ var require_embed = __commonJS({
         res.truncated = res.truncated || res.to < to;
         return res;
       }
-      // Refresh is the way back: what the strips opened up is a way of reading, and the block is
-      // what the note actually says.
       refresh() {
         this.above = 0;
         this.below = 0;
         return this.render(true);
       }
-      // notifyIndexChange fires on any rebuild in the watched tree; the file's cached mtime (plus
-      // the resolved window) tells whether *this* embed's content moved. Without an mtime there is
-      // nothing to compare, so the render is never skipped.
+      // Without an mtime there is nothing to compare a rebuild against, so nothing is skipped.
       sig(res) {
         const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
         const mtime = cached ? cached.mtimeMs : null;
@@ -2732,7 +2719,6 @@ var require_embed = __commonJS({
       unreadable(res) {
         return t2("embed.unreadable", { path: res.relPath });
       }
-      // Only what changes the way the snippet is read; the rest is the menu's.
       tools(row) {
         row.empty();
         const wrap = this.button(row, "wrap-text", t2("embed.tool.wrap"), () => this.toggleWrap(wrap));
@@ -2745,8 +2731,6 @@ var require_embed = __commonJS({
         this.chrome.body.toggleClass("is-wrapped", this.wrapped);
         this.measureWrap();
       }
-      // The highlight band is placed by row index, so it only means anything while every line is
-      // one row tall. It steps aside when a line actually wrapped, not merely because wrapping is on.
       measureWrap() {
         const code = this.chrome && this.chrome.body.querySelector(".code-linker-embed-code");
         const pre = code && code.querySelector("pre");
@@ -2756,8 +2740,7 @@ var require_embed = __commonJS({
         const rows = this.lineCount || 0;
         code.toggleClass("has-wrapped-lines", !!(lh > 0 && rows && pre.scrollHeight > lh * rows + 1));
       }
-      // Reading further at the end you asked for, the way a diff opens up its context. Offered
-      // only where there is file left, and for as much of it as there is.
+      // Offered only where there is file left, and for as much of it as there is.
       strip(body, side, n) {
         if (n < 1)
           return;
@@ -2794,12 +2777,17 @@ var require_embed = __commonJS({
         const room = MAX_EMBED_LINES - (res.to - res.from + 1);
         this.strip(body, "above", Math.min(MORE_STEP, start - 1, room));
         const code = body.createDiv({ cls: "code-linker-embed-code" });
-        if (res.targetLine != null) {
-          const idx = res.targetLine - start;
-          if (idx >= 0 && idx < snippet.lines.length) {
-            const band = code.createDiv({ cls: "code-linker-embed-band" });
-            band.style.top = "calc(var(--cl-lh) * " + idx + ")";
-          }
+        const marked = res.targetLine != null ? res.targetLine - start : -1;
+        if (marked >= 0 && marked < snippet.lines.length) {
+          const band = code.createDiv({ cls: "code-linker-embed-band" });
+          band.style.top = "calc(var(--cl-lh) * " + marked + ")";
+        }
+        if (numbered(this.spec)) {
+          const gutter = code.createDiv({ cls: "code-linker-embed-numbers" });
+          snippet.lines.forEach((_, i) => gutter.createDiv({
+            cls: i === marked ? "code-linker-embed-marked" : "",
+            text: String(start + i)
+          }));
         }
         this.text = snippet.lines.join("\n");
         this.lineCount = snippet.lines.length;
@@ -2809,7 +2797,6 @@ var require_embed = __commonJS({
         this.notes(res);
         return true;
       }
-      // Said under the snippet, and rewritten on every render: the chrome outlives the body.
       notes(res) {
         for (const note of Array.from(this.containerEl.querySelectorAll(".code-linker-embed-note")))
           note.remove();
@@ -2871,7 +2858,7 @@ var require_embed = __commonJS({
         ctx.addChild(new CodeEmbed(el, plugin, parseSpec2(source), ctx));
       });
     }
-    module2.exports = { registerEmbed: registerEmbed2, parseSpec: parseSpec2, splitPathRange: splitPathRange2, resolvePath: resolvePath2 };
+    module2.exports = { registerEmbed: registerEmbed2, parseSpec: parseSpec2, splitPathRange: splitPathRange2, resolvePath: resolvePath2, numbered };
   }
 });
 

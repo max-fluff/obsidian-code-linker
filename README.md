@@ -142,7 +142,7 @@ HttpClient
 - **A path with a single line** (`code-samples/http-client.ts:42`) shows that line (add `context: N` to pad it).
 - **A bare path** (`code-samples/http-client.ts`) shows the file from the top (capped).
 
-The command **Insert code embed** picks an entry, then offers the embed formats — by symbol, by declaration line, or a line range — and inserts the block. Optional `key: value` lines after the target tune it: `context: N` (grows the window by N lines on each side — around a symbol, a single line, or a range), `lines: 5-20` (override the range), and `title: …` (header label). The header is clickable and opens the file in your editor.
+The command **Insert code embed** picks an entry, then offers the embed formats — by symbol, by declaration line, or a line range — and inserts the block. Optional `key: value` lines after the target tune it: `context: N` (grows the window by N lines on each side — around a symbol, a single line, or a range), `lines: 5-20` (override the range), `numbers: off` (a snippet says which lines of the file it is showing; this drops the gutter), and `title: …` (header label). The header is clickable and opens the file in your editor.
 
 A snippet nearly always wants a line or two more than the block asked for, so an embed reads like a diff: **Show 10 more lines** sits above and below the snippet, and each opens up its own end. The strip is only there when there is more file on that side, and it says how much: three lines from the top of the file it offers three, not ten. What it opens up is a way of reading, not an edit — the block keeps saying what it said, **Refresh** puts it back, and `context: N` is how you make it stick.
 

@@ -14,10 +14,12 @@ const { t, plural } = require('./shared/i18n');
 
 const EMBED_LANG = 'code-link';
 const MAX_EMBED_LINES = 400; // bound how much a single embed can pour into the note
-const MORE_STEP = 10; // the most one "show more" opens up; near an end it offers what is left
+const MORE_STEP = 10; // the most one "show more" opens up
 
-const SPEC_KEYS = ['context', 'lines', 'title', 'bind'];
+const SPEC_KEYS = ['context', 'lines', 'title', 'bind', 'numbers'];
 const parseSpec = (source) => frame.parseSpec(source, SPEC_KEYS);
+
+const numbered = (spec) => !/^(off|no|false|hide|none)$/i.test((spec.numbers || '').trim());
 
 const baseName = (p) => nodePath.basename(p).replace(/\.[^.]+$/, '');
 const intOr = (v, def) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : def; };
@@ -137,17 +139,13 @@ class CodeEmbed extends frame.EmbedFrame {
     return res;
   }
 
-  // Refresh is the way back: what the strips opened up is a way of reading, and the block is
-  // what the note actually says.
   refresh() {
     this.above = 0;
     this.below = 0;
     return this.render(true);
   }
 
-  // notifyIndexChange fires on any rebuild in the watched tree; the file's cached mtime (plus
-  // the resolved window) tells whether *this* embed's content moved. Without an mtime there is
-  // nothing to compare, so the render is never skipped.
+  // Without an mtime there is nothing to compare a rebuild against, so nothing is skipped.
   sig(res) {
     const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
     const mtime = cached ? cached.mtimeMs : null;
@@ -160,7 +158,6 @@ class CodeEmbed extends frame.EmbedFrame {
 
   unreadable(res) { return t('embed.unreadable', { path: res.relPath }); }
 
-  // Only what changes the way the snippet is read; the rest is the menu's.
   tools(row) {
     row.empty();
     const wrap = this.button(row, 'wrap-text', t('embed.tool.wrap'), () => this.toggleWrap(wrap));
@@ -175,8 +172,6 @@ class CodeEmbed extends frame.EmbedFrame {
     this.measureWrap();
   }
 
-  // The highlight band is placed by row index, so it only means anything while every line is
-  // one row tall. It steps aside when a line actually wrapped, not merely because wrapping is on.
   measureWrap() {
     const code = this.chrome && this.chrome.body.querySelector('.code-linker-embed-code');
     const pre = code && code.querySelector('pre');
@@ -186,8 +181,7 @@ class CodeEmbed extends frame.EmbedFrame {
     code.toggleClass('has-wrapped-lines', !!(lh > 0 && rows && pre.scrollHeight > lh * rows + 1));
   }
 
-  // Reading further at the end you asked for, the way a diff opens up its context. Offered
-  // only where there is file left, and for as much of it as there is.
+  // Offered only where there is file left, and for as much of it as there is.
   strip(body, side, n) {
     if (n < 1) return;
     const label = plural('embedMore', n);
@@ -205,11 +199,9 @@ class CodeEmbed extends frame.EmbedFrame {
   }
 
   async renderBody(body, res, isCurrent) {
-    // Read before clearing so a live refresh keeps the old snippet on screen until the new one
-    // is ready (no blank flash when the index rebuilds). A step past the window is read too,
-    // and shown to nobody: how much of it comes back is how much file is left below. That step
-    // can hold a control character the window does not — readLines calls the whole read binary
-    // then — so a failed over-read is retried at the window the block actually asked for.
+    // Read before clearing, so a refresh keeps the old snippet up until the new one is ready. A
+    // step past the window says how much file is left below; a control character in that step
+    // makes readLines call the whole read binary, so it is retried at the window itself.
     const read = await readLines(res.absPath, res.from, res.to + MORE_STEP)
       || await readLines(res.absPath, res.from, res.to);
     if (!isCurrent()) return true;
@@ -228,18 +220,24 @@ class CodeEmbed extends frame.EmbedFrame {
 
     body.empty();
     body.toggleClass('is-wrapped', this.wrapped);
-    // What is left of the cap: past it the window cannot grow, and a strip offering lines it
-    // would then clamp away is the dead click these replaced.
+    // Past the cap the window cannot grow, and a strip offering lines it would clamp away is a
+    // dead click.
     const room = MAX_EMBED_LINES - (res.to - res.from + 1);
     this.strip(body, 'above', Math.min(MORE_STEP, start - 1, room));
 
     const code = body.createDiv({ cls: 'code-linker-embed-code' });
-    if (res.targetLine != null) {
-      const idx = res.targetLine - start;
-      if (idx >= 0 && idx < snippet.lines.length) {
-        const band = code.createDiv({ cls: 'code-linker-embed-band' });
-        band.style.top = 'calc(var(--cl-lh) * ' + idx + ')';
-      }
+    const marked = res.targetLine != null ? res.targetLine - start : -1;
+    if (marked >= 0 && marked < snippet.lines.length) {
+      const band = code.createDiv({ cls: 'code-linker-embed-band' });
+      band.style.top = 'calc(var(--cl-lh) * ' + marked + ')';
+    }
+    if (numbered(this.spec)) {
+      const gutter = code.createDiv({ cls: 'code-linker-embed-numbers' });
+      // The gutter is opaque and sits over the band, so the marked number carries it instead.
+      snippet.lines.forEach((_, i) => gutter.createDiv({
+        cls: i === marked ? 'code-linker-embed-marked' : '',
+        text: String(start + i),
+      }));
     }
     this.text = snippet.lines.join('\n');
     this.lineCount = snippet.lines.length;
@@ -250,7 +248,6 @@ class CodeEmbed extends frame.EmbedFrame {
     return true;
   }
 
-  // Said under the snippet, and rewritten on every render: the chrome outlives the body.
   notes(res) {
     for (const note of Array.from(this.containerEl.querySelectorAll('.code-linker-embed-note'))) note.remove();
     if (res.drift) {
@@ -307,4 +304,4 @@ function registerEmbed(plugin) {
   });
 }
 
-module.exports = { registerEmbed, parseSpec, splitPathRange, resolvePath };
+module.exports = { registerEmbed, parseSpec, splitPathRange, resolvePath, numbered };

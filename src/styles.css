@@ -155,14 +155,48 @@ settings:
   word-break: break-word;
 }
 
-/* The band is placed by row index, so it only lines up while every line is one row tall.
-   Measured after each render: wrapping switched on changes nothing until a line wraps. */
+/* Placed by row index, so it only lines up while every line is one row tall. */
 .%p%-embed-code.has-wrapped-lines .%p%-embed-band {
   display: none;
 }
 
 .%p%-embed-code {
   position: relative;
+  display: flex;
+  align-items: flex-start;
+}
+
+/* Sticky, so a long line scrolled sideways does not take the numbers with it; unselectable, so
+   copying the snippet copies code only. */
+.%p%-embed-numbers {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: 0 0 auto;
+  padding: 0 8px 0 10px;
+  background: var(--background-primary);
+  color: var(--text-faint);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.%p%-embed-numbers > div {
+  line-height: var(--cl-lh);
+}
+
+.%p%-embed-numbers > .%p%-embed-marked {
+  background: var(--%p%-highlight-color, var(--text-selection));
+}
+
+.%p%-code .%p%-embed-code pre {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.%p%-embed-code.has-wrapped-lines .%p%-embed-numbers {
+  display: none;
 }
 
 /* Reading further up or down, the way a diff opens up its context. */

@@ -146,8 +146,7 @@
   margin: var(--p-spacing, 1em) 0;
 }
 
-/* The embed's header is a row: the title takes what is left of it, the toolbar sits at the
-   end. The controls are Obsidian's own clickable-icon, so they read as the app's. */
+/* The embed's header is a row: the title takes what is left, the toolbar sits at the end. */
 .code-linker-embed-header {
   display: flex;
   align-items: center;
@@ -478,14 +477,48 @@ settings:
   word-break: break-word;
 }
 
-/* The band is placed by row index, so it only lines up while every line is one row tall.
-   Measured after each render: wrapping switched on changes nothing until a line wraps. */
+/* Placed by row index, so it only lines up while every line is one row tall. */
 .code-linker-embed-code.has-wrapped-lines .code-linker-embed-band {
   display: none;
 }
 
 .code-linker-embed-code {
   position: relative;
+  display: flex;
+  align-items: flex-start;
+}
+
+/* Sticky, so a long line scrolled sideways does not take the numbers with it; unselectable, so
+   copying the snippet copies code only. */
+.code-linker-embed-numbers {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: 0 0 auto;
+  padding: 0 8px 0 10px;
+  background: var(--background-primary);
+  color: var(--text-faint);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.code-linker-embed-numbers > div {
+  line-height: var(--cl-lh);
+}
+
+.code-linker-embed-numbers > .code-linker-embed-marked {
+  background: var(--code-linker-highlight-color, var(--text-selection));
+}
+
+.code-linker-code .code-linker-embed-code pre {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.code-linker-embed-code.has-wrapped-lines .code-linker-embed-numbers {
+  display: none;
 }
 
 /* Reading further up or down, the way a diff opens up its context. */
