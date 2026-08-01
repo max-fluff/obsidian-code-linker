@@ -33,6 +33,6 @@ export default {
     { src: 'hover.png',          title: 'Preview on hover',
       caption: 'Hover a link to read the source around the target line, in place.' },
     { src: 'embed.png',          title: 'Embed code in your notes',
-      caption: 'A code-link block renders a snippet inline and follows the code.' },
+      caption: 'A snippet inline, numbered by its lines in the file, opening out a few lines at a time.' },
   ],
 };
