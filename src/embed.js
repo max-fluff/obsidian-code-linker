@@ -5,27 +5,19 @@
 // tracks the declaration as code moves) or an explicit path with a line/range. The
 // block re-renders on every index change, so an open embed follows edits on disk.
 
-const { MarkdownRenderChild, Menu, Notice } = require('obsidian');
+const { Notice } = require('obsidian');
 const nodePath = require('path');
 const { readLines, renderCode } = require('./render');
 const { parseBinding } = require('./shared/binding');
-const { t } = require('./shared/i18n');
+const frame = require('./shared/embed-frame');
+const { t, plural } = require('./shared/i18n');
 
 const EMBED_LANG = 'code-link';
 const MAX_EMBED_LINES = 400; // bound how much a single embed can pour into the note
+const MORE_STEP = 10; // the most one "show more" opens up; near an end it offers what is left
 
-// First non-empty line is the target; later "key: value" lines are modifiers.
-function parseSpec(source) {
-  const spec = { target: '', context: '', lines: '', title: '', bind: '' };
-  for (const raw of source.split('\n')) {
-    const line = raw.trim();
-    if (!line) continue;
-    const m = /^(context|lines|title|bind)\s*:\s*(.*)$/i.exec(line);
-    if (m) spec[m[1].toLowerCase()] = m[2].trim();
-    else if (!spec.target) spec.target = line;
-  }
-  return spec;
-}
+const SPEC_KEYS = ['context', 'lines', 'title', 'bind'];
+const parseSpec = (source) => frame.parseSpec(source, SPEC_KEYS);
 
 const baseName = (p) => nodePath.basename(p).replace(/\.[^.]+$/, '');
 const intOr = (v, def) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : def; };
@@ -47,14 +39,6 @@ function splitPathRange(t) {
   const from = parseInt(m[2], 10);
   const to = m[3] ? parseInt(m[3], 10) : from;
   return { path: m[1], from: Math.min(from, to), to: Math.max(from, to), single: !m[3] };
-}
-
-// A block's bind: line, replaced, added, or (with an empty title) dropped. Everything
-// else in the spec is the reader's and stays put.
-function setBindLine(body, title) {
-  const out = body.filter((l) => !/^\s*bind\s*:/i.test(l));
-  if (title) out.push('bind: ' + title);
-  return out;
 }
 
 const looksLikePath = (s) => s.includes('/') || s.includes('\\') || /\.[a-z0-9]+$/i.test(s);
@@ -133,42 +117,152 @@ function resolve(plugin, spec) {
   return build(plugin, e.path, e.lang, from, to, lr ? null : e.line, e.name);
 }
 
-class CodeEmbed extends MarkdownRenderChild {
+class CodeEmbed extends frame.EmbedFrame {
   constructor(containerEl, plugin, spec, ctx) {
-    super(containerEl);
-    this.plugin = plugin;
-    this.spec = spec;
-    this.ctx = ctx; // getSectionInfo finds this block back in the note, so pins can edit it
-    this.renderId = 0;
+    super(containerEl, plugin, spec, ctx, 'code-linker');
+    containerEl.addClass('code-linker-code');
+    // Lines opened up above and below the block's own window, for this reading only.
+    this.above = 0;
+    this.below = 0;
+    this.wrapped = false;
   }
 
-  onload() {
-    this.containerEl.addEventListener('contextmenu', (evt) => this.onContextMenu(evt));
-    this.render();
-    // fs.watch -> rebuildIndex -> notifyIndexChange, so an open embed re-reads on edit.
-    this.unsub = this.plugin.onIndexChange(() => this.render());
+  resolve() {
+    const res = resolve(this.plugin, this.spec);
+    if (res.error || !(this.above || this.below)) return res;
+    res.from = Math.max(1, res.from - this.above);
+    const to = res.to + this.below;
+    res.to = Math.min(to, res.from + MAX_EMBED_LINES - 1);
+    res.truncated = res.truncated || res.to < to;
+    return res;
   }
 
-  onunload() {
-    if (this.unsub) this.unsub();
+  // Refresh is the way back: what the strips opened up is a way of reading, and the block is
+  // what the note actually says.
+  refresh() {
+    this.above = 0;
+    this.below = 0;
+    return this.render(true);
   }
 
-  // Open the embedded file, honouring the editor-link preset (and the format picker
-  // when "Always ask" is on) — the same path the open/insert commands use.
-  open() {
-    const e = this.res && this.res.entry;
-    if (!e) return;
-    this.plugin.withFormat(this.plugin.settings.askOnInsert, (tpl) => this.plugin.openEntry(e, tpl));
+  // notifyIndexChange fires on any rebuild in the watched tree; the file's cached mtime (plus
+  // the resolved window) tells whether *this* embed's content moved. Without an mtime there is
+  // nothing to compare, so the render is never skipped.
+  sig(res) {
+    const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
+    const mtime = cached ? cached.mtimeMs : null;
+    if (mtime == null) return null;
+    const drift = res.drift ? res.drift.state + (res.drift.line || '') : '';
+    return res.absPath + '|' + res.from + '|' + res.to + '|' + res.targetLine + '|' + mtime + '|' + drift;
   }
 
-  onContextMenu(evt) {
-    const res = this.res;
-    if (!res) return;
-    evt.preventDefault();
-    evt.stopPropagation();
-    const menu = new Menu();
-    if (res.entry) menu.addItem((i) => i.setTitle(t('embed.menu.open')).setIcon('go-to-file').onClick(() => this.open()));
-    menu.addItem((i) => i.setTitle(t('embed.menu.refresh')).setIcon('refresh-cw').onClick(() => this.render(true)));
+  headerText(res) { return this.spec.title || res.relPath; }
+
+  unreadable(res) { return t('embed.unreadable', { path: res.relPath }); }
+
+  // Only what changes the way the snippet is read; the rest is the menu's.
+  tools(row) {
+    row.empty();
+    const wrap = this.button(row, 'wrap-text', t('embed.tool.wrap'), () => this.toggleWrap(wrap));
+    wrap.toggleClass('is-active', this.wrapped);
+    this.button(row, 'copy', t('embed.tool.copy'), () => this.copy());
+  }
+
+  toggleWrap(button) {
+    this.wrapped = !this.wrapped;
+    button.toggleClass('is-active', this.wrapped);
+    this.chrome.body.toggleClass('is-wrapped', this.wrapped);
+    this.measureWrap();
+  }
+
+  // The highlight band is placed by row index, so it only means anything while every line is
+  // one row tall. It steps aside when a line actually wrapped, not merely because wrapping is on.
+  measureWrap() {
+    const code = this.chrome && this.chrome.body.querySelector('.code-linker-embed-code');
+    const pre = code && code.querySelector('pre');
+    if (!pre) return;
+    const lh = parseFloat(getComputedStyle(pre).lineHeight);
+    const rows = this.lineCount || 0;
+    code.toggleClass('has-wrapped-lines', !!(lh > 0 && rows && pre.scrollHeight > lh * rows + 1));
+  }
+
+  // Reading further at the end you asked for, the way a diff opens up its context. Offered
+  // only where there is file left, and for as much of it as there is.
+  strip(body, side, n) {
+    if (n < 1) return;
+    const label = plural('embedMore', n);
+    const button = this.button(body, side === 'above' ? 'chevron-up' : 'chevron-down', label, () => {
+      this[side] += n;
+      this.render(true);
+    });
+    button.addClass('code-linker-embed-more');
+    button.createSpan({ text: label });
+  }
+
+  copy() {
+    if (!this.text || !navigator.clipboard) return;
+    navigator.clipboard.writeText(this.text).then(() => new Notice(t('notice.snippetCopied')), () => {});
+  }
+
+  async renderBody(body, res, isCurrent) {
+    // Read before clearing so a live refresh keeps the old snippet on screen until the new one
+    // is ready (no blank flash when the index rebuilds). A step past the window is read too,
+    // and shown to nobody: how much of it comes back is how much file is left below. That step
+    // can hold a control character the window does not — readLines calls the whole read binary
+    // then — so a failed over-read is retried at the window the block actually asked for.
+    const read = await readLines(res.absPath, res.from, res.to + MORE_STEP)
+      || await readLines(res.absPath, res.from, res.to);
+    if (!isCurrent()) return true;
+    if (!read) return false;
+
+    const start = read.startLine;
+    const snippet = { lines: read.lines.slice(0, res.to - res.from + 1) };
+    const below = read.lines.length - snippet.lines.length;
+    const end = start + snippet.lines.length - 1;
+    this.setHeader(this.spec.title || res.relPath + ':' + (start === end ? start : start + '-' + end));
+    // The window is frozen where the spec says, so a drifted embed is showing the wrong code —
+    // mark the header the way a drifted link is marked, and say what to do.
+    for (const state of ['stale', 'broken']) {
+      this.chrome.header.toggleClass('code-linker-embed-' + state, !!res.drift && res.drift.state === state);
+    }
+
+    body.empty();
+    body.toggleClass('is-wrapped', this.wrapped);
+    // What is left of the cap: past it the window cannot grow, and a strip offering lines it
+    // would then clamp away is the dead click these replaced.
+    const room = MAX_EMBED_LINES - (res.to - res.from + 1);
+    this.strip(body, 'above', Math.min(MORE_STEP, start - 1, room));
+
+    const code = body.createDiv({ cls: 'code-linker-embed-code' });
+    if (res.targetLine != null) {
+      const idx = res.targetLine - start;
+      if (idx >= 0 && idx < snippet.lines.length) {
+        const band = code.createDiv({ cls: 'code-linker-embed-band' });
+        band.style.top = 'calc(var(--cl-lh) * ' + idx + ')';
+      }
+    }
+    this.text = snippet.lines.join('\n');
+    this.lineCount = snippet.lines.length;
+    await renderCode(code, this.text, res.prismId);
+    this.strip(body, 'below', Math.min(below, room));
+    this.measureWrap();
+    this.notes(res);
+    return true;
+  }
+
+  // Said under the snippet, and rewritten on every render: the chrome outlives the body.
+  notes(res) {
+    for (const note of Array.from(this.containerEl.querySelectorAll('.code-linker-embed-note'))) note.remove();
+    if (res.drift) {
+      this.containerEl.createDiv({
+        cls: 'code-linker-embed-note code-linker-embed-' + res.drift.state,
+        text: res.drift.state === 'stale' ? t('embed.stale', { line: res.drift.line }) : t('embed.broken'),
+      });
+    }
+    if (res.truncated) this.containerEl.createDiv({ cls: 'code-linker-embed-note', text: t('embed.truncated', { max: MAX_EMBED_LINES }) });
+  }
+
+  menuItems(menu, res) {
     if (res.drift && res.drift.state === 'stale') {
       menu.addItem((i) => i.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fix()));
     }
@@ -179,7 +273,6 @@ class CodeEmbed extends MarkdownRenderChild {
     if (parseBinding(this.spec.bind)) {
       menu.addItem((i) => i.setTitle(t('menu.unpin')).setIcon('pin-off').onClick(() => this.setBind('')));
     }
-    menu.showAtMouseEvent(evt);
   }
 
   pin(anchor) {
@@ -190,82 +283,21 @@ class CodeEmbed extends MarkdownRenderChild {
 
   // Bring this embed's frozen line up to date — the fence-body twin of a link's Fix.
   async fix() {
-    const info = this.ctx.getSectionInfo && this.ctx.getSectionInfo(this.containerEl);
-    if (!info) { new Notice(t('notice.cantBind')); return; }
-    const body = info.text.split('\n').slice(info.lineStart + 1, info.lineEnd);
-    const d = this.plugin.embedDrift(body);
-    if (!d || d.state !== 'stale') { new Notice(t('notice.linksUpdated', { n: 0 })); return; }
-    await this.plugin.writeEmbedBody(this.ctx.sourcePath, info, d.out);
-    new Notice(t('notice.linksUpdated', { n: 1 }));
+    let fixed = false;
+    const ok = await this.writeBody((body) => {
+      const d = this.plugin.embedDrift(body);
+      if (!d || d.state !== 'stale') return null;
+      fixed = true;
+      return d.out;
+    });
+    if (!fixed) { new Notice(t('notice.linksUpdated', { n: 0 })); return; }
+    new Notice(ok ? t('notice.linksUpdated', { n: 1 }) : t('notice.embedMoved'));
   }
 
-  // Rewrite this block's bind: line in the note itself. getSectionInfo gives the fence's
-  // line range, which is the only way back from a rendered block to its source.
   async setBind(title) {
-    const info = this.ctx.getSectionInfo && this.ctx.getSectionInfo(this.containerEl);
-    if (!info) { new Notice(t('notice.cantBind')); return; }
-    const body = info.text.split('\n').slice(info.lineStart + 1, info.lineEnd);
-    await this.plugin.writeEmbedBody(this.ctx.sourcePath, info, setBindLine(body, title));
+    const ok = await this.writeBody((body) => frame.setSpecLine(body, 'bind', title));
+    if (!ok) { new Notice(t('notice.embedMoved')); return; }
     new Notice(title ? t('notice.bound', { line: this.res.from }) : t('notice.unbound'));
-  }
-
-  notice(cls, text) {
-    this.containerEl.empty();
-    this.containerEl.createDiv({ cls, text });
-  }
-
-  async render(force) {
-    const el = this.containerEl;
-    el.addClass('code-linker-embed', 'code-linker-code');
-    const token = ++this.renderId;
-    const res = resolve(this.plugin, this.spec);
-    this.res = res; // for the right-click menu (open file / refresh)
-
-    // Skip the re-read/re-tokenize/DOM rebuild when nothing this embed shows has changed.
-    // notifyIndexChange fires on any rebuild in the watched tree; the file's cached mtime
-    // (plus the resolved window) tells us whether *this* embed's content actually moved.
-    const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
-    const mtime = cached ? cached.mtimeMs : null;
-    const drift = res.drift ? res.drift.state + (res.drift.line || '') : '';
-    const sig = res.error ? 'err:' + res.error
-      : res.absPath + '|' + res.from + '|' + res.to + '|' + res.targetLine + '|' + mtime + '|' + drift;
-    if (!force && sig === this.lastSig && (res.error || mtime != null)) return;
-    this.lastSig = sig;
-
-    if (res.error) { this.notice('code-linker-embed-error', res.error); return; }
-
-    // Read before clearing so a live refresh keeps the old snippet on screen until the
-    // new one is ready (no blank flash when the index rebuilds).
-    const snippet = await readLines(res.absPath, res.from, res.to);
-    if (token !== this.renderId) return; // a later render superseded this one
-    if (!snippet) { this.notice('code-linker-embed-error', t('embed.unreadable', { path: res.relPath })); this.lastSig = null; return; }
-    el.empty();
-
-    const start = snippet.startLine;
-    const end = start + snippet.lines.length - 1;
-    const header = el.createDiv({ cls: 'code-linker-embed-header mod-clickable' });
-    header.createSpan({ text: this.spec.title || res.relPath + ':' + (start === end ? start : start + '-' + end) });
-    header.addEventListener('click', () => this.open());
-    // The window is frozen where the spec says, so a drifted embed is showing the wrong
-    // code — mark the header the way a drifted link is marked, and say what to do.
-    if (res.drift) header.classList.add('code-linker-embed-' + res.drift.state);
-
-    const body = el.createDiv({ cls: 'code-linker-embed-body' });
-    if (res.targetLine != null) {
-      const idx = res.targetLine - start;
-      if (idx >= 0 && idx < snippet.lines.length) {
-        const band = body.createDiv({ cls: 'code-linker-embed-band' });
-        band.style.top = 'calc(var(--cl-lh) * ' + idx + ')';
-      }
-    }
-    await renderCode(body, snippet.lines.join('\n'), res.prismId);
-    if (res.drift) {
-      el.createDiv({
-        cls: 'code-linker-embed-note code-linker-embed-' + res.drift.state,
-        text: res.drift.state === 'stale' ? t('embed.stale', { line: res.drift.line }) : t('embed.broken'),
-      });
-    }
-    if (res.truncated) el.createDiv({ cls: 'code-linker-embed-note', text: t('embed.truncated', { max: MAX_EMBED_LINES }) });
   }
 }
 
@@ -275,4 +307,4 @@ function registerEmbed(plugin) {
   });
 }
 
-module.exports = { registerEmbed, parseSpec, splitPathRange, resolvePath, setBindLine };
+module.exports = { registerEmbed, parseSpec, splitPathRange, resolvePath };

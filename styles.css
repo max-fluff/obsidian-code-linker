@@ -146,6 +146,76 @@
   margin: var(--p-spacing, 1em) 0;
 }
 
+/* The embed's header is a row: the title takes what is left of it, the toolbar sits at the
+   end. The controls are Obsidian's own clickable-icon, so they read as the app's. */
+.code-linker-embed-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.code-linker-embed-title {
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Obsidian floats its own edit-block button over the top right of a rendered block, so the
+   last control keeps clear of it. */
+.code-linker-embed-tools {
+  padding-right: 22px;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 2px;
+  opacity: var(--code-linker-embed-tools-idle, 1);
+  transition: opacity 100ms ease-out;
+}
+
+.code-linker-embed:hover .code-linker-embed-tools,
+.code-linker-embed:focus-within .code-linker-embed-tools {
+  opacity: 1;
+}
+
+.code-linker-embed-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.code-linker-embed-group:empty {
+  display: none;
+}
+
+.code-linker-embed-group + .code-linker-embed-group {
+  margin-left: 4px;
+  padding-left: 5px;
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.code-linker-embed-button {
+  height: auto;
+  padding: 2px 4px;
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+}
+
+.code-linker-embed-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.code-linker-embed-button.is-active {
+  color: var(--text-accent);
+}
+
+.code-linker-embed-button.is-hidden,
+.code-linker-embed-group.is-hidden {
+  display: none;
+}
+
 .code-linker-embed-error,
 .code-linker-embed-note {
   padding: 6px 10px;
@@ -293,14 +363,50 @@ settings:
       - dashed
       - solid
       - double
+  -
+    id: code-linker-snippet-line-height
+    title: Snippet line height
+    description: How tightly the lines of a preview or an embed are set. The target line's highlight follows it.
+    type: variable-number-slider
+    default: 1.5
+    min: 1
+    max: 2.5
+    step: 0.05
+  -
+    id: code-linker-embed-height
+    title: Inline embed height
+    description: How tall an inline embed grows before it scrolls, in percent of the window.
+    type: variable-number-slider
+    default: 60
+    min: 20
+    max: 100
+    step: 5
+  -
+    id: code-linker-hover-height
+    title: Hover preview height
+    description: How tall a hover preview grows before it scrolls, in percent of the window.
+    type: variable-number-slider
+    default: 40
+    min: 20
+    max: 100
+    step: 5
+  -
+    id: code-linker-embed-tools-idle
+    title: Inline embed toolbar when idle
+    description: How visible the embed's toolbar is while the pointer is elsewhere. 0 keeps it out of the way until you hover the embed or focus it.
+    type: variable-number-slider
+    default: 1
+    min: 0
+    max: 1
+    step: 0.25
 
 */
 
 /* Snippet chrome shared by the hover popover and the inline embed. Both containers carry
    .code-linker-code (see the token colours below). The popover is a fixed overlay; the
-   embed flows inline — otherwise the parts match. --cl-lh is fixed so the highlight band
-   can be placed by row index, and body/pre carry no vertical padding so row 0 sits at
-   top 0. user-select on the popover lets the snippet be copied. */
+   embed flows inline — otherwise the parts match. The band and the code read --cl-lh alike, so
+   the band can be placed by row index whatever it is set to, and body/pre carry no vertical
+   padding so row 0 sits at top 0. user-select on the popover lets the snippet be copied. */
 .code-linker-hover,
 .code-linker-embed {
   overflow: hidden;
@@ -321,8 +427,6 @@ settings:
 
 .code-linker-embed-header {
   overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
 }
 
 .code-linker-hover-body,
@@ -332,15 +436,15 @@ settings:
   padding: 0;
   font-family: var(--font-monospace);
   font-size: var(--font-ui-smaller);
-  --cl-lh: 1.5em;
+  --cl-lh: calc(var(--code-linker-snippet-line-height, 1.5) * 1em);
 }
 
 .code-linker-hover-body {
-  max-height: 40vh;
+  max-height: calc(var(--code-linker-hover-height, 40) * 1vh);
 }
 
 .code-linker-embed-body {
-  max-height: 60vh;
+  max-height: calc(var(--code-linker-embed-height, 60) * 1vh);
 }
 
 /* The .code-linker-code prefix raises specificity above the theme's / editor's own
@@ -367,6 +471,44 @@ settings:
   font-size: inherit;
   background: transparent;
   color: var(--code-normal, var(--text-normal));
+}
+
+.code-linker-code .code-linker-embed-body.is-wrapped pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* The band is placed by row index, so it only lines up while every line is one row tall.
+   Measured after each render: wrapping switched on changes nothing until a line wraps. */
+.code-linker-embed-code.has-wrapped-lines .code-linker-embed-band {
+  display: none;
+}
+
+.code-linker-embed-code {
+  position: relative;
+}
+
+/* Reading further up or down, the way a diff opens up its context. */
+.code-linker-embed-more {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  width: 100%;
+  height: auto;
+  padding: 1px 10px;
+  border-radius: 0;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-smaller);
+  text-align: left;
+  cursor: pointer;
+}
+
+.code-linker-embed-more:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
 }
 
 .code-linker-hover-band,

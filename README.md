@@ -142,7 +142,16 @@ HttpClient
 - **A path with a single line** (`code-samples/http-client.ts:42`) shows that line (add `context: N` to pad it).
 - **A bare path** (`code-samples/http-client.ts`) shows the file from the top (capped).
 
-The command **Insert code embed** picks an entry, then offers the embed formats — by symbol, by declaration line, or a line range — and inserts the block. Optional `key: value` lines after the target tune it: `context: N` (grows the window by N lines on each side — around a symbol, a single line, or a range), `lines: 5-20` (override the range), and `title: …` (header label). The header is clickable and opens the file in your editor; right-click an embed for **Open code file** / **Refresh embed**.
+The command **Insert code embed** picks an entry, then offers the embed formats — by symbol, by declaration line, or a line range — and inserts the block. Optional `key: value` lines after the target tune it: `context: N` (grows the window by N lines on each side — around a symbol, a single line, or a range), `lines: 5-20` (override the range), and `title: …` (header label). The header is clickable and opens the file in your editor.
+
+A snippet nearly always wants a line or two more than the block asked for, so an embed reads like a diff: **Show 10 more lines** sits above and below the snippet, and each opens up its own end. The strip is only there when there is more file on that side, and it says how much: three lines from the top of the file it offers three, not ten. What it opens up is a way of reading, not an edit — the block keeps saying what it said, **Refresh** puts it back, and `context: N` is how you make it stick.
+
+The header carries a toolbar for the rest:
+
+- **Wrap long lines** — for a file with lines wider than the note. The target line's highlight is placed by line height, so it steps aside once a line actually wraps — switching wrapping on for a snippet that fits changes nothing.
+- **Copy snippet** — the lines as shown, to the clipboard.
+- **Open** / **Refresh** — the file in your editor, and a re-read from disk.
+- **⋯** — everything that edits the note: **Pin** / **Unpin**, and **Fix** when the pinned code has moved. They live behind one deliberate click rather than beside the pure ones, so a stray click can't rewrite your note. Right-clicking the embed opens the same menu.
 
 Embeds re-render whenever the index rebuilds, so with **Auto-refresh index** on, an open embed updates after you edit the file on disk. A symbol embed re-resolves its line; a range embed re-reads the file's current contents (the line range itself stays fixed).
 
@@ -305,7 +314,7 @@ With **Respect .gitignore** on, a `.gitignore` prunes the scan too: files are re
 
 ### Styling
 
-The preview/embed line highlight and the stale/broken underlines (colour, underline style) are exposed to the [Style Settings](https://github.com/mgmeyers/obsidian-style-settings) plugin under a *Code Linker* section, so you can restyle them from a UI. Without Style Settings, or left at default, they follow your theme's colours. Every value is a CSS variable, so you can also override them in a CSS snippet (e.g. `--code-linker-highlight-color`, `--code-linker-stale-color`).
+Everything the plugin draws around a snippet is exposed to the [Style Settings](https://github.com/mgmeyers/obsidian-style-settings) plugin under a *Code Linker* section: the preview/embed line highlight, the stale/broken underlines (colour and underline style), how tightly the snippet's lines are set, how tall an embed and a hover preview grow before they scroll, and how visible an embed's toolbar is when the pointer is elsewhere. Without Style Settings, or left at default, they follow your theme's colours. Every value is a CSS variable, so a snippet does just as well: `--code-linker-highlight-color`, `--code-linker-stale-color`, `--code-linker-broken-color`, `--code-linker-mark-underline-style`, `--code-linker-snippet-line-height`, `--code-linker-embed-height`, `--code-linker-hover-height`, `--code-linker-embed-tools-idle`. The target line's highlight is placed by the line height, so the two can't drift apart.
 
 ## Link targets and URI templates
 

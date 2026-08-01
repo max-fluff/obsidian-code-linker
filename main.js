@@ -1303,6 +1303,9 @@ var require_sigil = __commonJS({
       "menu.open.group": "Find and open",
       "notice.updateSkipped": "({n} note(s) skipped \u2014 changed since the preview)",
       "embed.menu.refresh": "Refresh embed",
+      "embed.tool.more": "More actions",
+      "embed.tool.open": "Open",
+      "embed.tool.refresh": "Refresh",
       "modal.embedPlaceholder": "Choose an embed format\u2026",
       "modal.update.summary": "{links} change(s) across {files} note(s). Uncheck any change to skip it, or a note to skip all of its changes.",
       "modal.update.upToDate": "Everything is up to date \u2014 nothing to update.",
@@ -1342,6 +1345,9 @@ var require_sigil = __commonJS({
       "menu.open.group": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C",
       "notice.updateSkipped": "(\u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u2014 {n}: \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u0438\u0441\u044C \u043F\u043E\u0441\u043B\u0435 \u043F\u0440\u0435\u0434\u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0430)",
       "embed.menu.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C embed",
+      "embed.tool.more": "\u0415\u0449\u0451 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044F",
+      "embed.tool.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C",
+      "embed.tool.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C",
       "modal.embedPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 embed\u2026",
       "modal.update.summary": "\u041F\u0440\u0430\u0432\u043E\u043A \u2014 {links} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}. \u0421\u043D\u0438\u043C\u0438\u0442\u0435 \u0433\u0430\u043B\u043E\u0447\u043A\u0443 \u0441 \u043F\u0440\u0430\u0432\u043A\u0438, \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0435\u0451, \u0438\u043B\u0438 \u0441 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u2014 \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0432\u0441\u0435 \u0435\u0451 \u043F\u0440\u0430\u0432\u043A\u0438.",
       "modal.update.upToDate": "\u0412\u0441\u0451 \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u043E \u2014 \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E.",
@@ -2355,24 +2361,22 @@ var require_hover = __commonJS({
   }
 });
 
-// src/embed.js
-var require_embed = __commonJS({
-  "src/embed.js"(exports2, module2) {
+// src/shared/embed-frame.js
+var require_embed_frame = __commonJS({
+  "src/shared/embed-frame.js"(exports2, module2) {
     "use strict";
-    var { MarkdownRenderChild, Menu, Notice: Notice2 } = require("obsidian");
-    var nodePath2 = require("path");
-    var { readLines, renderCode } = require_render();
-    var { parseBinding: parseBinding2 } = require_binding();
+    var obsidian = require("obsidian");
     var { t: t2 } = require_i18n();
-    var EMBED_LANG = "code-link";
-    var MAX_EMBED_LINES = 400;
-    function parseSpec2(source) {
-      const spec = { target: "", context: "", lines: "", title: "", bind: "" };
-      for (const raw of source.split("\n")) {
+    function parseSpec2(source, keys) {
+      const spec = { target: "" };
+      for (const k of keys)
+        spec[k] = "";
+      const re = new RegExp("^(" + keys.join("|") + ")\\s*:\\s*(.*)$", "i");
+      for (const raw of String(source == null ? "" : source).split("\n")) {
         const line = raw.trim();
         if (!line)
           continue;
-        const m = /^(context|lines|title|bind)\s*:\s*(.*)$/i.exec(line);
+        const m = re.exec(line);
         if (m)
           spec[m[1].toLowerCase()] = m[2].trim();
         else if (!spec.target)
@@ -2380,6 +2384,218 @@ var require_embed = __commonJS({
       }
       return spec;
     }
+    function setSpecLine(body, key, value) {
+      const re = new RegExp("^\\s*" + key + "\\s*:", "i");
+      const at = body.findIndex((l) => re.test(l));
+      if (!value)
+        return body.filter((l) => !re.test(l));
+      if (at < 0)
+        return [...body, key + ": " + value];
+      const out = body.slice();
+      out[at] = key + ": " + value;
+      return out;
+    }
+    async function writeEmbedBody(app, sourcePath, info, body) {
+      const view = app.workspace.getActiveViewOfType(obsidian.MarkdownView);
+      const editor = view && view.file && view.file.path === sourcePath ? view.editor : null;
+      if (editor) {
+        editor.replaceRange(body.join("\n") + "\n", { line: info.lineStart + 1, ch: 0 }, { line: info.lineEnd, ch: 0 });
+        return true;
+      }
+      const file = app.vault.getAbstractFileByPath(sourcePath);
+      if (!file)
+        return false;
+      let moved = false;
+      await app.vault.process(file, (data) => {
+        const lines = data.split("\n");
+        const here = lines.slice(info.lineStart, info.lineEnd + 1).join("\n");
+        if (here !== info.text.split("\n").slice(info.lineStart, info.lineEnd + 1).join("\n")) {
+          moved = true;
+          return data;
+        }
+        lines.splice(info.lineStart + 1, info.lineEnd - info.lineStart - 1, ...body);
+        return lines.join("\n");
+      });
+      return !moved;
+    }
+    function toolButton(parent, cls, icon, label, onClick) {
+      const b = parent.createEl("button", {
+        cls: "clickable-icon " + cls + "-embed-button",
+        attr: { type: "button", "aria-label": label, title: label }
+      });
+      if (icon && typeof obsidian.setIcon === "function")
+        obsidian.setIcon(b, icon);
+      b.addEventListener("click", (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        onClick(evt);
+      });
+      return b;
+    }
+    var EmbedFrame = class extends obsidian.MarkdownRenderChild {
+      // `cls` is the plugin's class prefix, the same one its stylesheet is written against.
+      constructor(containerEl, plugin, spec, ctx, cls) {
+        super(containerEl);
+        this.plugin = plugin;
+        this.spec = spec;
+        this.ctx = ctx;
+        this.cls = cls;
+        this.renderId = 0;
+        this.lastSig = null;
+      }
+      // --- what a plugin fills in ---------------------------------------------------------------
+      // The spec resolved to whatever renderBody needs, or { error } for an inline notice.
+      resolve() {
+        return { error: "embed-frame: resolve() not implemented" };
+      }
+      // Everything this embed shows, as a string. Same string means nothing changed and the
+      // re-render is skipped; null means the answer isn't knowable, so never skip.
+      sig() {
+        return null;
+      }
+      headerText() {
+        return "";
+      }
+      // Draw into `body`. False means nothing could be drawn — the frame shows its own notice.
+      async renderBody() {
+        return false;
+      }
+      // Fill the plugin's own toolbar row, on every render: a control that reads the result of
+      // one stays current.
+      tools() {
+      }
+      menuItems() {
+      }
+      // The notice text for a target that resolved but could not be read.
+      unreadable() {
+        return "";
+      }
+      release() {
+      }
+      // --- the shell ----------------------------------------------------------------------------
+      onload() {
+        this.containerEl.addEventListener("contextmenu", (evt) => this.onContextMenu(evt));
+        this.render();
+        this.unsub = this.plugin.onIndexChange(() => this.render());
+      }
+      onunload() {
+        if (this.unsub)
+          this.unsub();
+        this.release();
+      }
+      open() {
+        const entry = this.res && this.res.entry;
+        if (!entry)
+          return;
+        this.plugin.withFormat(this.plugin.settings.askOnInsert, (tpl) => this.plugin.openEntry(entry, tpl));
+      }
+      // The right-click menu, and what ⋯ opens — see CONTRIBUTING.md on what a toolbar may carry.
+      menu() {
+        const menu = new obsidian.Menu();
+        if (this.res.entry)
+          menu.addItem((i) => i.setTitle(t2("embed.menu.open")).setIcon("go-to-file").onClick(() => this.open()));
+        menu.addItem((i) => i.setTitle(t2("embed.menu.refresh")).setIcon("refresh-cw").onClick(() => this.refresh()));
+        this.menuItems(menu, this.res);
+        return menu;
+      }
+      onContextMenu(evt) {
+        if (!this.res)
+          return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        this.menu().showAtMouseEvent(evt);
+      }
+      refresh() {
+        return this.render(true);
+      }
+      notice(text) {
+        this.release();
+        this.chrome = null;
+        this.containerEl.empty();
+        this.containerEl.createDiv({ cls: this.cls + "-embed-error", text });
+      }
+      button(parent, icon, label, onClick) {
+        return toolButton(parent, this.cls, icon, label, onClick);
+      }
+      // The header, the toolbar and the body, built once and kept: a plugin that holds state in
+      // its own controls loses it if the row is rebuilt under it.
+      frame() {
+        if (this.chrome && this.chrome.body.parentElement === this.containerEl)
+          return this.chrome;
+        const el = this.containerEl;
+        el.empty();
+        el.addClass(this.cls + "-embed");
+        const header = el.createDiv({ cls: this.cls + "-embed-header" });
+        const title = header.createSpan({ cls: this.cls + "-embed-title mod-clickable" });
+        title.addEventListener("click", () => this.open());
+        const bar = header.createDiv({ cls: this.cls + "-embed-tools" });
+        const own = bar.createDiv({ cls: this.cls + "-embed-group" });
+        const common = bar.createDiv({ cls: this.cls + "-embed-group" });
+        this.button(common, "external-link", t2("embed.tool.open"), () => this.open());
+        this.button(common, "refresh-cw", t2("embed.tool.refresh"), () => this.refresh());
+        this.button(common, "more-horizontal", t2("embed.tool.more"), (evt) => this.menu().showAtMouseEvent(evt));
+        const body = el.createDiv({ cls: this.cls + "-embed-body" });
+        this.chrome = { header, title, tools: own, body };
+        return this.chrome;
+      }
+      async render(force) {
+        const token = ++this.renderId;
+        const res = this.resolve();
+        this.res = res;
+        const sig = res.error ? "err:" + res.error : this.sig(res);
+        if (!force && sig !== null && sig === this.lastSig)
+          return;
+        this.lastSig = sig;
+        if (res.error) {
+          this.notice(res.error);
+          return;
+        }
+        const chrome = this.frame();
+        chrome.title.setText(this.headerText(res));
+        this.tools(chrome.tools, res);
+        const drew = await this.renderBody(chrome.body, res, () => token === this.renderId);
+        if (token !== this.renderId)
+          return;
+        if (!drew) {
+          this.notice(this.unreadable(res));
+          this.lastSig = null;
+        }
+      }
+      setHeader(text) {
+        if (this.chrome)
+          this.chrome.title.setText(text);
+      }
+      // Rewrite this block's own lines in the note. `edit(body)` gets the block body, without the
+      // fences, and returns what it should become, or null to leave the note alone.
+      async writeBody(edit) {
+        const info = this.ctx && this.ctx.getSectionInfo && this.ctx.getSectionInfo(this.containerEl);
+        if (!info)
+          return false;
+        const next = edit(info.text.split("\n").slice(info.lineStart + 1, info.lineEnd));
+        if (!next)
+          return false;
+        return writeEmbedBody(this.plugin.app, this.ctx.sourcePath, info, next);
+      }
+    };
+    module2.exports = { EmbedFrame, parseSpec: parseSpec2, setSpecLine, writeEmbedBody, toolButton };
+  }
+});
+
+// src/embed.js
+var require_embed = __commonJS({
+  "src/embed.js"(exports2, module2) {
+    "use strict";
+    var { Notice: Notice2 } = require("obsidian");
+    var nodePath2 = require("path");
+    var { readLines, renderCode } = require_render();
+    var { parseBinding: parseBinding2 } = require_binding();
+    var frame = require_embed_frame();
+    var { t: t2, plural: plural2 } = require_i18n();
+    var EMBED_LANG = "code-link";
+    var MAX_EMBED_LINES = 400;
+    var MORE_STEP = 10;
+    var SPEC_KEYS = ["context", "lines", "title", "bind"];
+    var parseSpec2 = (source) => frame.parseSpec(source, SPEC_KEYS);
     var baseName = (p) => nodePath2.basename(p).replace(/\.[^.]+$/, "");
     var intOr = (v, def) => {
       const n = parseInt(v, 10);
@@ -2400,12 +2616,6 @@ var require_embed = __commonJS({
       const from = parseInt(m[2], 10);
       const to = m[3] ? parseInt(m[3], 10) : from;
       return { path: m[1], from: Math.min(from, to), to: Math.max(from, to), single: !m[3] };
-    }
-    function setBindLine(body, title) {
-      const out = body.filter((l) => !/^\s*bind\s*:/i.test(l));
-      if (title)
-        out.push("bind: " + title);
-      return out;
     }
     var looksLikePath = (s) => s.includes("/") || s.includes("\\") || /\.[a-z0-9]+$/i.test(s);
     function langForPath(plugin, relPath) {
@@ -2480,41 +2690,139 @@ var require_embed = __commonJS({
       const to = (lr ? lr.to : e.line) + ctx;
       return build(plugin, e.path, e.lang, from, to, lr ? null : e.line, e.name);
     }
-    var CodeEmbed = class extends MarkdownRenderChild {
+    var CodeEmbed = class extends frame.EmbedFrame {
       constructor(containerEl, plugin, spec, ctx) {
-        super(containerEl);
-        this.plugin = plugin;
-        this.spec = spec;
-        this.ctx = ctx;
-        this.renderId = 0;
+        super(containerEl, plugin, spec, ctx, "code-linker");
+        containerEl.addClass("code-linker-code");
+        this.above = 0;
+        this.below = 0;
+        this.wrapped = false;
       }
-      onload() {
-        this.containerEl.addEventListener("contextmenu", (evt) => this.onContextMenu(evt));
-        this.render();
-        this.unsub = this.plugin.onIndexChange(() => this.render());
+      resolve() {
+        const res = resolve(this.plugin, this.spec);
+        if (res.error || !(this.above || this.below))
+          return res;
+        res.from = Math.max(1, res.from - this.above);
+        const to = res.to + this.below;
+        res.to = Math.min(to, res.from + MAX_EMBED_LINES - 1);
+        res.truncated = res.truncated || res.to < to;
+        return res;
       }
-      onunload() {
-        if (this.unsub)
-          this.unsub();
+      // Refresh is the way back: what the strips opened up is a way of reading, and the block is
+      // what the note actually says.
+      refresh() {
+        this.above = 0;
+        this.below = 0;
+        return this.render(true);
       }
-      // Open the embedded file, honouring the editor-link preset (and the format picker
-      // when "Always ask" is on) — the same path the open/insert commands use.
-      open() {
-        const e = this.res && this.res.entry;
-        if (!e)
+      // notifyIndexChange fires on any rebuild in the watched tree; the file's cached mtime (plus
+      // the resolved window) tells whether *this* embed's content moved. Without an mtime there is
+      // nothing to compare, so the render is never skipped.
+      sig(res) {
+        const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
+        const mtime = cached ? cached.mtimeMs : null;
+        if (mtime == null)
+          return null;
+        const drift = res.drift ? res.drift.state + (res.drift.line || "") : "";
+        return res.absPath + "|" + res.from + "|" + res.to + "|" + res.targetLine + "|" + mtime + "|" + drift;
+      }
+      headerText(res) {
+        return this.spec.title || res.relPath;
+      }
+      unreadable(res) {
+        return t2("embed.unreadable", { path: res.relPath });
+      }
+      // Only what changes the way the snippet is read; the rest is the menu's.
+      tools(row) {
+        row.empty();
+        const wrap = this.button(row, "wrap-text", t2("embed.tool.wrap"), () => this.toggleWrap(wrap));
+        wrap.toggleClass("is-active", this.wrapped);
+        this.button(row, "copy", t2("embed.tool.copy"), () => this.copy());
+      }
+      toggleWrap(button) {
+        this.wrapped = !this.wrapped;
+        button.toggleClass("is-active", this.wrapped);
+        this.chrome.body.toggleClass("is-wrapped", this.wrapped);
+        this.measureWrap();
+      }
+      // The highlight band is placed by row index, so it only means anything while every line is
+      // one row tall. It steps aside when a line actually wrapped, not merely because wrapping is on.
+      measureWrap() {
+        const code = this.chrome && this.chrome.body.querySelector(".code-linker-embed-code");
+        const pre = code && code.querySelector("pre");
+        if (!pre)
           return;
-        this.plugin.withFormat(this.plugin.settings.askOnInsert, (tpl) => this.plugin.openEntry(e, tpl));
+        const lh = parseFloat(getComputedStyle(pre).lineHeight);
+        const rows = this.lineCount || 0;
+        code.toggleClass("has-wrapped-lines", !!(lh > 0 && rows && pre.scrollHeight > lh * rows + 1));
       }
-      onContextMenu(evt) {
-        const res = this.res;
-        if (!res)
+      // Reading further at the end you asked for, the way a diff opens up its context. Offered
+      // only where there is file left, and for as much of it as there is.
+      strip(body, side, n) {
+        if (n < 1)
           return;
-        evt.preventDefault();
-        evt.stopPropagation();
-        const menu = new Menu();
-        if (res.entry)
-          menu.addItem((i) => i.setTitle(t2("embed.menu.open")).setIcon("go-to-file").onClick(() => this.open()));
-        menu.addItem((i) => i.setTitle(t2("embed.menu.refresh")).setIcon("refresh-cw").onClick(() => this.render(true)));
+        const label = plural2("embedMore", n);
+        const button = this.button(body, side === "above" ? "chevron-up" : "chevron-down", label, () => {
+          this[side] += n;
+          this.render(true);
+        });
+        button.addClass("code-linker-embed-more");
+        button.createSpan({ text: label });
+      }
+      copy() {
+        if (!this.text || !navigator.clipboard)
+          return;
+        navigator.clipboard.writeText(this.text).then(() => new Notice2(t2("notice.snippetCopied")), () => {
+        });
+      }
+      async renderBody(body, res, isCurrent) {
+        const read = await readLines(res.absPath, res.from, res.to + MORE_STEP) || await readLines(res.absPath, res.from, res.to);
+        if (!isCurrent())
+          return true;
+        if (!read)
+          return false;
+        const start = read.startLine;
+        const snippet = { lines: read.lines.slice(0, res.to - res.from + 1) };
+        const below = read.lines.length - snippet.lines.length;
+        const end = start + snippet.lines.length - 1;
+        this.setHeader(this.spec.title || res.relPath + ":" + (start === end ? start : start + "-" + end));
+        for (const state of ["stale", "broken"]) {
+          this.chrome.header.toggleClass("code-linker-embed-" + state, !!res.drift && res.drift.state === state);
+        }
+        body.empty();
+        body.toggleClass("is-wrapped", this.wrapped);
+        const room = MAX_EMBED_LINES - (res.to - res.from + 1);
+        this.strip(body, "above", Math.min(MORE_STEP, start - 1, room));
+        const code = body.createDiv({ cls: "code-linker-embed-code" });
+        if (res.targetLine != null) {
+          const idx = res.targetLine - start;
+          if (idx >= 0 && idx < snippet.lines.length) {
+            const band = code.createDiv({ cls: "code-linker-embed-band" });
+            band.style.top = "calc(var(--cl-lh) * " + idx + ")";
+          }
+        }
+        this.text = snippet.lines.join("\n");
+        this.lineCount = snippet.lines.length;
+        await renderCode(code, this.text, res.prismId);
+        this.strip(body, "below", Math.min(below, room));
+        this.measureWrap();
+        this.notes(res);
+        return true;
+      }
+      // Said under the snippet, and rewritten on every render: the chrome outlives the body.
+      notes(res) {
+        for (const note of Array.from(this.containerEl.querySelectorAll(".code-linker-embed-note")))
+          note.remove();
+        if (res.drift) {
+          this.containerEl.createDiv({
+            cls: "code-linker-embed-note code-linker-embed-" + res.drift.state,
+            text: res.drift.state === "stale" ? t2("embed.stale", { line: res.drift.line }) : t2("embed.broken")
+          });
+        }
+        if (res.truncated)
+          this.containerEl.createDiv({ cls: "code-linker-embed-note", text: t2("embed.truncated", { max: MAX_EMBED_LINES }) });
+      }
+      menuItems(menu, res) {
         if (res.drift && res.drift.state === "stale") {
           menu.addItem((i) => i.setTitle(t2("menu.fixLink")).setIcon("wrench").onClick(() => this.fix()));
         }
@@ -2524,7 +2832,6 @@ var require_embed = __commonJS({
         if (parseBinding2(this.spec.bind)) {
           menu.addItem((i) => i.setTitle(t2("menu.unpin")).setIcon("pin-off").onClick(() => this.setBind("")));
         }
-        menu.showAtMouseEvent(evt);
       }
       pin(anchor) {
         const o = this.plugin.pinOption(this.plugin.embedSite(this.spec), this.spec.bind, anchor);
@@ -2536,86 +2843,27 @@ var require_embed = __commonJS({
       }
       // Bring this embed's frozen line up to date — the fence-body twin of a link's Fix.
       async fix() {
-        const info = this.ctx.getSectionInfo && this.ctx.getSectionInfo(this.containerEl);
-        if (!info) {
-          new Notice2(t2("notice.cantBind"));
-          return;
-        }
-        const body = info.text.split("\n").slice(info.lineStart + 1, info.lineEnd);
-        const d = this.plugin.embedDrift(body);
-        if (!d || d.state !== "stale") {
+        let fixed = false;
+        const ok = await this.writeBody((body) => {
+          const d = this.plugin.embedDrift(body);
+          if (!d || d.state !== "stale")
+            return null;
+          fixed = true;
+          return d.out;
+        });
+        if (!fixed) {
           new Notice2(t2("notice.linksUpdated", { n: 0 }));
           return;
         }
-        await this.plugin.writeEmbedBody(this.ctx.sourcePath, info, d.out);
-        new Notice2(t2("notice.linksUpdated", { n: 1 }));
+        new Notice2(ok ? t2("notice.linksUpdated", { n: 1 }) : t2("notice.embedMoved"));
       }
-      // Rewrite this block's bind: line in the note itself. getSectionInfo gives the fence's
-      // line range, which is the only way back from a rendered block to its source.
       async setBind(title) {
-        const info = this.ctx.getSectionInfo && this.ctx.getSectionInfo(this.containerEl);
-        if (!info) {
-          new Notice2(t2("notice.cantBind"));
+        const ok = await this.writeBody((body) => frame.setSpecLine(body, "bind", title));
+        if (!ok) {
+          new Notice2(t2("notice.embedMoved"));
           return;
         }
-        const body = info.text.split("\n").slice(info.lineStart + 1, info.lineEnd);
-        await this.plugin.writeEmbedBody(this.ctx.sourcePath, info, setBindLine(body, title));
         new Notice2(title ? t2("notice.bound", { line: this.res.from }) : t2("notice.unbound"));
-      }
-      notice(cls, text) {
-        this.containerEl.empty();
-        this.containerEl.createDiv({ cls, text });
-      }
-      async render(force) {
-        const el = this.containerEl;
-        el.addClass("code-linker-embed", "code-linker-code");
-        const token = ++this.renderId;
-        const res = resolve(this.plugin, this.spec);
-        this.res = res;
-        const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
-        const mtime = cached ? cached.mtimeMs : null;
-        const drift = res.drift ? res.drift.state + (res.drift.line || "") : "";
-        const sig = res.error ? "err:" + res.error : res.absPath + "|" + res.from + "|" + res.to + "|" + res.targetLine + "|" + mtime + "|" + drift;
-        if (!force && sig === this.lastSig && (res.error || mtime != null))
-          return;
-        this.lastSig = sig;
-        if (res.error) {
-          this.notice("code-linker-embed-error", res.error);
-          return;
-        }
-        const snippet = await readLines(res.absPath, res.from, res.to);
-        if (token !== this.renderId)
-          return;
-        if (!snippet) {
-          this.notice("code-linker-embed-error", t2("embed.unreadable", { path: res.relPath }));
-          this.lastSig = null;
-          return;
-        }
-        el.empty();
-        const start = snippet.startLine;
-        const end = start + snippet.lines.length - 1;
-        const header = el.createDiv({ cls: "code-linker-embed-header mod-clickable" });
-        header.createSpan({ text: this.spec.title || res.relPath + ":" + (start === end ? start : start + "-" + end) });
-        header.addEventListener("click", () => this.open());
-        if (res.drift)
-          header.classList.add("code-linker-embed-" + res.drift.state);
-        const body = el.createDiv({ cls: "code-linker-embed-body" });
-        if (res.targetLine != null) {
-          const idx = res.targetLine - start;
-          if (idx >= 0 && idx < snippet.lines.length) {
-            const band = body.createDiv({ cls: "code-linker-embed-band" });
-            band.style.top = "calc(var(--cl-lh) * " + idx + ")";
-          }
-        }
-        await renderCode(body, snippet.lines.join("\n"), res.prismId);
-        if (res.drift) {
-          el.createDiv({
-            cls: "code-linker-embed-note code-linker-embed-" + res.drift.state,
-            text: res.drift.state === "stale" ? t2("embed.stale", { line: res.drift.line }) : t2("embed.broken")
-          });
-        }
-        if (res.truncated)
-          el.createDiv({ cls: "code-linker-embed-note", text: t2("embed.truncated", { max: MAX_EMBED_LINES }) });
       }
     };
     function registerEmbed2(plugin) {
@@ -2623,7 +2871,7 @@ var require_embed = __commonJS({
         ctx.addChild(new CodeEmbed(el, plugin, parseSpec2(source), ctx));
       });
     }
-    module2.exports = { registerEmbed: registerEmbed2, parseSpec: parseSpec2, splitPathRange: splitPathRange2, resolvePath: resolvePath2, setBindLine };
+    module2.exports = { registerEmbed: registerEmbed2, parseSpec: parseSpec2, splitPathRange: splitPathRange2, resolvePath: resolvePath2 };
   }
 });
 
@@ -2908,7 +3156,8 @@ var require_actualize2 = __commonJS({
     var { LINE_RE: LINE_RE2, parseBinding: parseBinding2, ownsBinding } = require_binding();
     var shared = require_actualize();
     var OWNER2 = "code";
-    var { parseSpec: parseSpec2, setBindLine } = require_embed();
+    var { parseSpec: parseSpec2 } = require_embed();
+    var { setSpecLine } = require_embed_frame();
     var preview = require_update_preview();
     var { t: t2 } = require_i18n();
     var PREVIEW_CLASS = "code-linker-preview";
@@ -2975,7 +3224,7 @@ var require_actualize2 = __commonJS({
         if (spec.bind)
           return null;
         const bind = plugin.buildPinTitle(plugin.embedSite(spec), anchors);
-        return bind ? setBindLine(body, bind) : null;
+        return bind ? setSpecLine(body, "bind", bind) : null;
       });
       return { text: embeds.text, count: links.count + embeds.count };
     };
@@ -4007,6 +4256,10 @@ var require_en = __commonJS({
       "embed.notFound": "Code Linker: no code entry matches \u201C{query}\u201D",
       "embed.ambiguous": "Code Linker: {n} entries match \u201C{query}\u201D \u2014 add a language/kind filter (e.g. py:) or a path to pick one",
       "embed.unreadable": "Code Linker: can\u2019t read {path}",
+      "plural.embedMore": { one: "Show 1 more line", other: "Show {n} more lines" },
+      "embed.tool.wrap": "Wrap long lines",
+      "embed.tool.copy": "Copy snippet",
+      "notice.snippetCopied": "Code Linker: snippet copied",
       "embed.truncated": "Code Linker: showing the first {max} lines",
       // Status bar
       "status.indexing": "Code Linker: indexing\u2026 {n}",
@@ -4165,6 +4418,10 @@ var require_ru = __commonJS({
       "embed.notFound": "Code Linker: \u043D\u0435\u0442 \u0437\u0430\u043F\u0438\u0441\u0438 \u043A\u043E\u0434\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
       "embed.ambiguous": "Code Linker: \u043F\u043E\u0434 \xAB{query}\xBB \u043F\u043E\u0434\u0445\u043E\u0434\u0438\u0442 \u0437\u0430\u043F\u0438\u0441\u0435\u0439: {n} \u2014 \u0443\u0442\u043E\u0447\u043D\u0438\u0442\u0435 \u0444\u0438\u043B\u044C\u0442\u0440\u043E\u043C \u044F\u0437\u044B\u043A\u0430/\u0442\u0438\u043F\u0430 (\u043D\u0430\u043F\u0440. py:) \u0438\u043B\u0438 \u043F\u0443\u0442\u0451\u043C",
       "embed.unreadable": "Code Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C {path}",
+      "plural.embedMore": { one: "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0435\u0449\u0451 {n} \u0441\u0442\u0440\u043E\u043A\u0443", few: "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0435\u0449\u0451 {n} \u0441\u0442\u0440\u043E\u043A\u0438", many: "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0435\u0449\u0451 {n} \u0441\u0442\u0440\u043E\u043A", other: "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0435\u0449\u0451 {n} \u0441\u0442\u0440\u043E\u043A\u0438" },
+      "embed.tool.wrap": "\u041F\u0435\u0440\u0435\u043D\u043E\u0441\u0438\u0442\u044C \u0434\u043B\u0438\u043D\u043D\u044B\u0435 \u0441\u0442\u0440\u043E\u043A\u0438",
+      "embed.tool.copy": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u043D\u0438\u043F\u043F\u0435\u0442",
+      "notice.snippetCopied": "Code Linker: \u0441\u043D\u0438\u043F\u043F\u0435\u0442 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D",
       "embed.truncated": "Code Linker: \u043F\u043E\u043A\u0430\u0437\u0430\u043D\u044B \u043F\u0435\u0440\u0432\u044B\u0435 {max} \u0441\u0442\u0440\u043E\u043A",
       // Status bar
       "status.indexing": "Code Linker: \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435\u2026 {n}",
@@ -5639,34 +5896,6 @@ var CodeLinkerPlugin = class extends Plugin {
     const rel = resolvePath(this, pr.path);
     const text = this.lineTextAt(rel, pr.from);
     return text == null ? null : { rel, line: pr.from, text };
-  }
-  // Put a block's edited body back into its note. An open editor keeps cursor and undo;
-  // in reading view there's none, so the file is rewritten through the vault.
-  async writeEmbedBody(sourcePath, info, body) {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    const editor = view && view.file && view.file.path === sourcePath ? view.editor : null;
-    if (editor) {
-      editor.replaceRange(body.join("\n") + "\n", { line: info.lineStart + 1, ch: 0 }, { line: info.lineEnd, ch: 0 });
-      return;
-    }
-    const file = this.app.vault.getAbstractFileByPath(sourcePath);
-    if (!file) {
-      new Notice(t("notice.cantBind"));
-      return;
-    }
-    let moved = false;
-    await this.app.vault.process(file, (data) => {
-      const lines = data.split("\n");
-      const fence = lines.slice(info.lineStart, info.lineEnd + 1).join("\n");
-      if (fence !== info.text.split("\n").slice(info.lineStart, info.lineEnd + 1).join("\n")) {
-        moved = true;
-        return data;
-      }
-      lines.splice(info.lineStart + 1, info.lineEnd - info.lineStart - 1, ...body);
-      return lines.join("\n");
-    });
-    if (moved)
-      new Notice(t("notice.embedMoved"));
   }
   pinLink(editor, link, anchor) {
     const p = this.linkPinOption(link, anchor);

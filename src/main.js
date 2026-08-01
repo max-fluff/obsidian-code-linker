@@ -1424,33 +1424,6 @@ class CodeLinkerPlugin extends Plugin {
     return text == null ? null : { rel, line: pr.from, text };
   }
 
-  // Put a block's edited body back into its note. An open editor keeps cursor and undo;
-  // in reading view there's none, so the file is rewritten through the vault.
-  async writeEmbedBody(sourcePath, info, body) {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    const editor = view && view.file && view.file.path === sourcePath ? view.editor : null;
-    if (editor) {
-      editor.replaceRange(body.join('\n') + '\n', { line: info.lineStart + 1, ch: 0 }, { line: info.lineEnd, ch: 0 });
-      return;
-    }
-    const file = this.app.vault.getAbstractFileByPath(sourcePath);
-    if (!file) { new Notice(t('notice.cantBind')); return; }
-    let moved = false;
-    await this.app.vault.process(file, (data) => {
-      const lines = data.split('\n');
-      // getSectionInfo numbered the block against the text as rendered, so an edit since
-      // then would splice these lines out of whatever now sits at those numbers.
-      const fence = lines.slice(info.lineStart, info.lineEnd + 1).join('\n');
-      if (fence !== info.text.split('\n').slice(info.lineStart, info.lineEnd + 1).join('\n')) {
-        moved = true;
-        return data;
-      }
-      lines.splice(info.lineStart + 1, info.lineEnd - info.lineStart - 1, ...body);
-      return lines.join('\n');
-    });
-    if (moved) new Notice(t('notice.embedMoved'));
-  }
-
   pinLink(editor, link, anchor) {
     const p = this.linkPinOption(link, anchor);
     if (!p) { new Notice(t('notice.cantBind')); return; }

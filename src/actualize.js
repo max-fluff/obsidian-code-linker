@@ -15,7 +15,8 @@ const shared = require('./shared/actualize');
 
 // Which bindings are this plugin's, as the shared module names them.
 const OWNER = 'code';
-const { parseSpec, setBindLine } = require('./embed');
+const { parseSpec } = require('./embed');
+const { setSpecLine } = require('./shared/embed-frame');
 const preview = require('./shared/update-preview');
 const { t } = require('./shared/i18n');
 
@@ -81,7 +82,7 @@ const pinLinksInText = (anchors) => (plugin, text) => {
     const spec = parseSpec(body.join('\n'));
     if (spec.bind) return null;
     const bind = plugin.buildPinTitle(plugin.embedSite(spec), anchors);
-    return bind ? setBindLine(body, bind) : null;
+    return bind ? setSpecLine(body, 'bind', bind) : null;
   });
   return { text: embeds.text, count: links.count + embeds.count };
 };
