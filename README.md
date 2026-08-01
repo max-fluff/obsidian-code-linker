@@ -134,7 +134,7 @@ HttpClient
 ````
 
 <p align="center">
-  <img src="docs/images/embed.png" alt="Two rendered code-link embeds: a symbol resolved to its declaration with the line highlighted, and a titled line range" width="640">
+  <img src="docs/images/embed.png" alt="Two rendered code-link embeds: a symbol resolved to its declaration with the line highlighted, and a titled line range, both numbered by their lines in the file" width="640">
 </p>
 
 - **A symbol name** (`HttpClient`) is resolved through the index to its declaration and shown with that line highlighted. Because it resolves on every render, it tracks the declaration as the code moves — the embed stays correct without you touching it. When a name collides across files, prefix an [inline filter](#inline-filters) (`py:handler`) to resolve it without a path.
@@ -151,7 +151,7 @@ The header carries a toolbar for the rest:
 - **Wrap long lines** — for a file with lines wider than the note. The target line's highlight is placed by line height, so it steps aside once a line actually wraps — switching wrapping on for a snippet that fits changes nothing.
 - **Copy snippet** — the lines as shown, to the clipboard.
 - **Open** / **Refresh** — the file in your editor, and a re-read from disk.
-- **⋯** — everything that edits the note: **Pin** / **Unpin**, and **Fix** when the pinned code has moved. They live behind one deliberate click rather than beside the pure ones, so a stray click can't rewrite your note. Right-clicking the embed opens the same menu.
+- **⋯** — everything that edits the note: **Pin** / **Unpin**, and **Fix** when the pinned code has moved. They live behind one deliberate click rather than beside the pure ones, so a stray click can't rewrite your note. Right-clicking the embed opens the same menu. In reading view the menu is the pure half only — a note being read is not a note being edited, and there is no editor there to undo a write in.
 
 Embeds re-render whenever the index rebuilds, so with **Auto-refresh index** on, an open embed updates after you edit the file on disk. A symbol embed re-resolves its line; a range embed re-reads the file's current contents (the line range itself stays fixed).
 

@@ -260,6 +260,7 @@ class CodeEmbed extends frame.EmbedFrame {
   }
 
   menuItems(menu, res) {
+    if (!this.editable()) return;
     if (res.drift && res.drift.state === 'stale') {
       menu.addItem((i) => i.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fix()));
     }

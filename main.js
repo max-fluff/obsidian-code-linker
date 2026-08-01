@@ -2418,6 +2418,7 @@ var require_embed_frame = __commonJS({
       });
       return !moved;
     }
+    var inEditor = (el) => !!(el && el.closest && el.closest(".markdown-source-view"));
     function toolButton(parent, cls, icon, label, onClick) {
       const b = parent.createEl("button", {
         cls: "clickable-icon " + cls + "-embed-button",
@@ -2500,6 +2501,9 @@ var require_embed_frame = __commonJS({
       refresh() {
         return this.render(true);
       }
+      editable() {
+        return inEditor(this.containerEl);
+      }
       notice(text) {
         this.release();
         this.chrome = null;
@@ -2567,7 +2571,7 @@ var require_embed_frame = __commonJS({
         return writeEmbedBody(this.plugin.app, this.ctx.sourcePath, info, next);
       }
     };
-    module2.exports = { EmbedFrame, parseSpec: parseSpec2, setSpecLine, writeEmbedBody, toolButton };
+    module2.exports = { EmbedFrame, parseSpec: parseSpec2, setSpecLine, writeEmbedBody, toolButton, inEditor };
   }
 });
 
@@ -2810,6 +2814,8 @@ var require_embed = __commonJS({
           this.containerEl.createDiv({ cls: "code-linker-embed-note", text: t2("embed.truncated", { max: MAX_EMBED_LINES }) });
       }
       menuItems(menu, res) {
+        if (!this.editable())
+          return;
         if (res.drift && res.drift.state === "stale") {
           menu.addItem((i) => i.setTitle(t2("menu.fixLink")).setIcon("wrench").onClick(() => this.fix()));
         }
