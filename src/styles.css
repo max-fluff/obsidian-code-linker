@@ -312,3 +312,99 @@ settings:
   align-items: center;
   gap: 6px;
 }
+
+/* --- index panel ------------------------------------------------------- */
+
+.%p%-index-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.%p%-index-bar input[type='search'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.%p%-index-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: var(--font-semibold);
+  margin: 12px 0 4px;
+}
+
+.%p%-index-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 0 6px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.%p%-index-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.%p%-index-row.is-toggle {
+  cursor: pointer;
+}
+
+.%p%-index-row.is-sub {
+  padding-left: 1.6em;
+  border-bottom: none;
+}
+
+.%p%-index-caret {
+  color: var(--text-muted);
+  width: 1em;
+}
+
+.%p%-index-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.%p%-index-name.is-link,
+.%p%-index-act.is-link {
+  cursor: pointer;
+  color: var(--text-accent);
+}
+
+.%p%-index-kind,
+.%p%-index-count {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  white-space: nowrap;
+}
+
+.%p%-index-count.is-broken {
+  color: var(--text-error);
+}
+
+.%p%-index-path {
+  flex: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.%p%-index-empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  padding: 4px 0;
+}

@@ -135,4 +135,4 @@ const methods = {
   pinLinksInVault(anchors) { return this.rewriteVault(pinLinksInText(anchors), 'notice.linksPinnedVault'); },
 };
 
-module.exports = { methods, staleLinksExtension, refreshStaleLinks };
+module.exports = { methods, staleLinksExtension, refreshStaleLinks, rewriteUpdates };

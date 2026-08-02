@@ -107,7 +107,7 @@ function resolve(plugin, spec) {
   // A "py:"/"def:" filter narrows a name that collides across files (a dotted "Foo.bar"
   // is a path here — looksLikePath owns the dot — so class scope is suggestion-only).
   const f = plugin.parseQuery(target);
-  const matches = plugin.entriesByName(f.name).filter((m) => plugin.entryPassesFilter(m, f));
+  const matches = plugin.entriesForQuery(f).filter((m) => plugin.entryPassesFilter(m, f));
   if (!matches.length) return { error: t('embed.notFound', { query: target }) };
   const paths = new Set(matches.map((m) => m.path));
   if (paths.size > 1) return { error: t('embed.ambiguous', { n: paths.size, query: target }) };

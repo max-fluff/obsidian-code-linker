@@ -5,6 +5,7 @@ const { PRESETS, JETBRAINS_PRODUCTS } = require('./constants');
 const { DiskPathSuggest, suggestAvailable } = require('./shared/deeplink/disk-suggest');
 const { renderFolderList } = require('./shared/folder-list');
 const { t, plural } = require('./shared/i18n');
+const { redraw } = require('./shared/settings-redraw');
 const { renderPrecedenceSetting: precedenceSetting } = require('./shared/precedence');
 
 // Path tidy for the folder-list rows: backslashes to slashes, no trailing slash.
@@ -69,7 +70,12 @@ class CodeLinkerSettingTab extends PluginSettingTab {
     }
   }
 
+  // Every fold and toggle redraws the whole pane; the reader keeps their place (shared/settings-redraw).
   display() {
+    redraw(this, () => this.draw());
+  }
+
+  draw() {
     const { containerEl } = this;
     containerEl.empty();
     const s = this.plugin.settings;
@@ -316,6 +322,15 @@ class CodeLinkerSettingTab extends PluginSettingTab {
       .setName(t('set.statusBar.name'))
       .setDesc(t('set.statusBar.desc'))
       .addToggle((c) => c.setValue(s.showStatusBar).onChange(async (v) => { s.showStatusBar = v; await save(false); }));
+
+    new Setting(containerEl)
+      .setName(t('set.ribbon.name'))
+      .setDesc(t('set.ribbon.desc'))
+      .addToggle((c) => c.setValue(s.showRibbonIcon).onChange(async (v) => {
+        s.showRibbonIcon = v;
+        await save(false);
+        this.plugin.applyRibbonIcon();
+      }));
 
     new Setting(containerEl)
       .setName(t('set.contextMenu.name'))

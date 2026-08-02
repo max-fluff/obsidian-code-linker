@@ -252,7 +252,18 @@ Each enabled language lists the entity kinds it actually put in the index (e.g. 
 - With the cursor on a code link: **Pin code link to its symbol / kind / exact line**, **Unpin code link**, **Update this code link**, **Copy code link** (see [Keeping links current](#keeping-links-current)).
 - **Update code links in this note** / **…in the whole vault** — preview and apply fixes to drifted pinned links and embeds.
 - **Pin unpinned code links and embeds in this note** / **…in the whole vault** — catch up notes written before pinning existed.
+- **Open the code index panel** — see [The index panel](#the-index-panel).
 - **Rebuild code index**.
+
+### The index panel
+
+The panel in the right sidebar answers the two questions the modals cannot: what the scan actually found, and which links no longer land.
+
+The top half is the index itself — every language with the number of entries under it, and the kinds inside each once you open one. A search box finds a symbol by name and offers to open the file or copy a link to it, without inserting anything into a note.
+
+The bottom half is the state of the links already written. It reads every note in the vault, so it only runs when you press **Scan** — nothing happens on its own. What comes back is one row per note, with how many of its links drifted and how many are broken, and **Fix all** hands the drifted ones to the same preview the update commands use. Scanning is a dry run of exactly that rewrite: it reads and never writes.
+
+A broken link is one whose file the index knows and whose target is no longer there. A link into a file the index has never heard of is left unjudged rather than reddened — one mistyped code root would otherwise condemn every link at once.
 
 
 ### Priority among linker plugins
@@ -408,6 +419,7 @@ In an existing clone without the submodule, run `git submodule update --init` fi
 - `settings-tab.js` — the settings UI.
 - `builtin-languages.js` — built-in language definitions (bundled from `languages/*.json`).
 - `modal.js` — the command's `FuzzySuggestModal` picker.
+- `index-view.js` — the sidebar panel: the index by language and kind, and the vault's stale and broken links.
 - `hover.js` — the file-snippet popover shown on hover.
 - `embed.js` — the inline ` ```code-link ` block renderer.
 - `render.js` — Prism-highlighted snippet rendering shared by hover and embeds.

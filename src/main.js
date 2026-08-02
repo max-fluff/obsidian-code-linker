@@ -19,7 +19,7 @@ const { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEM
 const { compileGitignore, isIgnored } = require('./gitignore');
 const { watchTree } = require('./shared/fs-watch');
 const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
-const { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require('./shared/binding');
+const { LINE_RE, ANCHORS, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require('./shared/binding');
 const { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require('./shared/root-token');
 const { menuSection } = require('./shared/menu');
 const { buildMenu } = require('./shared/menu-verbs');
@@ -45,11 +45,13 @@ const PRODUCT_PLACEHOLDER = /{(?:jetbrainsProduct|product)}/;
 const MAX_PARSE_LINE_LENGTH = 2000;
 const { BUILTIN_LANGUAGES } = require('./builtin-languages');
 const { CodeIndexSuggest } = require('./suggest');
-const filter = require('./filter');
+const facets = require('./shared/facets');
+const { VALUE, TOKEN } = facets;
 const { HoverPreview } = require('./hover');
 const { registerEmbed, parseSpec, splitPathRange, resolvePath } = require('./embed');
 const actualize = require('./actualize');
 const { CodeLinkModal, PresetPickerModal, LinePromptModal, PinAnchorModal } = require('./modal');
+const { CodeIndexView, INDEX_VIEW_TYPE } = require('./index-view');
 const { CodeLinkerSettingTab } = require('./settings-tab');
 const { initI18n, withFamily, t, plural } = require('./shared/i18n');
 const api = require('./api');
@@ -119,6 +121,9 @@ class CodeLinkerPlugin extends Plugin {
     this.editorStatusEl.setAttribute('aria-label', t('status.editorTooltip'));
     this.registerDomEvent(this.editorStatusEl, 'click', () => this.switchPreset());
     this.updateStatusBar();
+    this.registerView(INDEX_VIEW_TYPE, (leaf) => new CodeIndexView(leaf, this));
+    this.applyRibbonIcon();
+    this.addCommand({ id: 'open-code-index', name: t('cmd.openIndex'), callback: () => this.activateIndexView() });
     this.addCommand({ id: 'rebuild-code-index', name: t('cmd.rebuildIndex'), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: 'insert-code-link', name: t('cmd.insertLink'), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLink(editor, e, tpl))) });
     this.addCommand({ id: 'insert-code-link-as', name: t('cmd.insertLinkAs'), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(true, (tpl) => this.insertLink(editor, e, tpl))) });
@@ -538,15 +543,71 @@ class CodeLinkerPlugin extends Plugin {
     return l ? l.id : null;
   }
 
+  // Every way an entry can be addressed, built once: the suggest asks per entry over the whole
+  // index. `sym:` is worth having despite matching what a bare name does, because it is the
+  // only way to ask for a symbol whose own name is a language or kind token.
+  // `pinFrom` reads an anchor's value off a spot in a file rather than off an index entry,
+  // because that is what this plugin pins from: `store` goes into the title, `show` is what the
+  // menu says it pinned to. Null when the anchor can't be met there.
+  buildFacets() {
+    const decl = (site) => this.declAtSite(site);
+    return [
+      { name: 'lang', typed: VALUE, resolve: (t) => this.resolveLangToken(t), of: (e) => e.lang },
+      {
+        name: 'kind',
+        typed: VALUE,
+        resolve: (t) => (this.kinds.has(t) ? t : null),
+        of: (e) => e.kind,
+        anchor: 'kind',
+        pinFrom: (site) => { const d = decl(site); return d && d.kind ? { store: d.kind, show: d.kind } : null; },
+      },
+      {
+        name: 'sym',
+        typed: TOKEN,
+        of: (e) => e.name,
+        anchor: 'sym',
+        pinFrom: (site) => { const d = decl(site); return d ? { store: d.name, show: d.name } : null; },
+      },
+      {
+        name: 'line',
+        anchor: 'line',
+        // A blank line hashes to nothing the index keeps, so that pin is broken at birth.
+        pinFrom: (site) => (site.text.trim() ? { store: hashLine(site.text), show: String(site.line) } : null),
+      },
+    ];
+  }
+
+  pinnable(anchor) {
+    return this.facets().find((f) => f.anchor === anchor && f.pinFrom) || null;
+  }
+
+  facets() {
+    if (!this.queryFacets) this.queryFacets = this.buildFacets();
+    return this.queryFacets;
+  }
+
+  // The container is a suffix of the name rather than a prefix of the query, so it is read
+  // here and not by the shared grammar: "Foo.bar" is bar declared beside Foo.
   parseQuery(raw) {
-    return filter.parseQuery(raw, (t) => this.resolveLangToken(t), this.kinds);
+    const q = facets.parseQuery(raw, this.facets());
+    const segs = q.name.split('.');
+    q.name = segs[segs.length - 1];
+    q.container = segs.length > 1 && segs[segs.length - 2] ? segs[segs.length - 2] : null;
+    return q;
+  }
+
+  matchTextFor(e, f) {
+    return facets.matchText(e, f, this.facets());
+  }
+
+  entriesForQuery(f) {
+    return facets.entriesFor(this, f, this.facets());
   }
 
   // Whether an entry passes a parsed inline filter (the caller matches the name). A
   // container must be declared in the same file — its class name stands in for the path.
   entryPassesFilter(e, f) {
-    if (f.lang && e.lang !== f.lang) return false;
-    if (f.kind && e.kind !== f.kind) return false;
+    if (!facets.passes(e, f, this.facets())) return false;
     if (f.container) {
       const v = this.fileCache.get(e.path);
       const lc = f.container.toLowerCase();
@@ -1242,6 +1303,27 @@ class CodeLinkerPlugin extends Plugin {
   // Resolve {root} to the absolute code root: a copied link is usually pasted outside
   // the vault (a browser, a terminal), where the portable {root} token wouldn't resolve.
   // Inserted links keep {root} for note portability.
+  async activateIndexView() {
+    const { workspace } = this.app;
+    let leaf = workspace.getLeavesOfType(INDEX_VIEW_TYPE)[0];
+    if (!leaf) {
+      leaf = workspace.getRightLeaf(false);
+      if (!leaf) return;
+      await leaf.setViewState({ type: INDEX_VIEW_TYPE, active: true });
+    }
+    workspace.revealLeaf(leaf);
+  }
+
+  applyRibbonIcon() {
+    const want = this.settings.showRibbonIcon;
+    if (want && !this.ribbonEl) {
+      this.ribbonEl = this.addRibbonIcon('file-code', t('ribbon.tooltip'), () => this.activateIndexView());
+    } else if (!want && this.ribbonEl) {
+      this.ribbonEl.remove();
+      this.ribbonEl = null;
+    }
+  }
+
   copyLink(e, template) {
     if (this.gitTemplateBlocked(e, template)) return;
     navigator.clipboard.writeText(this.fillRoot(this.buildLink(e, false, template)));
@@ -1380,20 +1462,13 @@ class CodeLinkerPlugin extends Plugin {
   // to show. Anchors add up rather than replace, so pinning symbol then kind narrows the
   // same spot. Null when there's nothing to pin to, or when it would change nothing.
   pinOption(site, current, anchor) {
-    if (!site) return null;
-    const next = Object.assign({ sym: '', kind: '', hash: '' }, parseBinding(current));
-    let value;
-    if (anchor === 'line') {
-      next.hash = hashLine(site.text);
-      value = String(site.line);
-    } else {
-      const decl = this.declAtSite(site);
-      if (!decl) return null;
-      value = anchor === 'sym' ? decl.name : decl.kind;
-      next[anchor] = value;
-    }
+    const f = site && this.pinnable(anchor);
+    const got = f && f.pinFrom(site);
+    if (!got) return null;
+    const next = Object.assign({}, parseBinding(current));
+    next[ANCHORS[anchor]] = got.store;
     const title = formatBinding(next);
-    return title === (current || '') ? null : { title, value, site };
+    return title === (current || '') ? null : { title, value: got.show, site };
   }
 
   linkPinOption(link, anchor) {
@@ -1406,12 +1481,14 @@ class CodeLinkerPlugin extends Plugin {
   // line — a blank line hashes to nothing the index keeps, so that pin is broken at birth.
   buildPinTitle(site, anchors) {
     if (!site) return null;
-    const b = { sym: '', kind: '', hash: '' };
-    const decl = (anchors.sym || anchors.kind) ? this.declAtSite(site) : null;
-    if (anchors.sym) { if (!decl) return null; b.sym = decl.name; }
-    if (anchors.kind) { if (!decl || !decl.kind) return null; b.kind = decl.kind; }
-    if (anchors.line) { if (!site.text.trim()) return null; b.hash = hashLine(site.text); }
-    return b.sym || b.kind || b.hash ? formatBinding(b) : null;
+    const b = {};
+    for (const f of this.facets()) {
+      if (!f.pinFrom || !anchors[f.anchor]) continue;
+      const got = f.pinFrom(site);
+      if (!got) return null;
+      b[ANCHORS[f.anchor]] = got.store;
+    }
+    return Object.keys(b).length ? formatBinding(b) : null;
   }
 
   // The spot a ```code-link block's window is frozen at — the same shape linkSite gives,

@@ -58,6 +58,7 @@ const DEFAULT_SETTINGS = {
   recentPresets: [], // preset keys, most-recent first, to float recent picks up the picker
   askOnInsert: true, // ask which editor format to use on every insert (vs. a fixed preset)
   showStatusBar: false, // show the active editor preset in the status bar, click to switch
+  showRibbonIcon: true, // ribbon entry to the index panel
   enabledLanguages: null, // null on first run => every built-in enabled
   languagesFile: 'code-languages.json', // vault-relative JSON of extra/override languages
   disabledKinds: [], // "<langId>:<kind>" keys hidden from suggestions (query-time filter)

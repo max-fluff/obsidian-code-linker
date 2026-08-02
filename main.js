@@ -214,6 +214,8 @@ var require_constants = __commonJS({
       // ask which editor format to use on every insert (vs. a fixed preset)
       showStatusBar: false,
       // show the active editor preset in the status bar, click to switch
+      showRibbonIcon: true,
+      // ribbon entry to the index panel
       enabledLanguages: null,
       // null on first run => every built-in enabled
       languagesFile: "code-languages.json",
@@ -489,9 +491,23 @@ var require_fs_watch = __commonJS({
 var require_binding = __commonJS({
   "src/shared/binding.js"(exports2, module2) {
     "use strict";
-    var ANCHORS = { sym: "sym", kind: "kind", sec: "sec", cite: "cite", line: "hash" };
-    var TOKEN = /^(sym|kind|sec|cite|line):(.+)$/;
-    var OWNERS = { code: ["sym", "kind", "hash"], reference: ["sec", "cite"] };
+    var ANCHOR_LIST = [
+      { token: "sym", field: "sym", owner: "code" },
+      { token: "kind", field: "kind", owner: "code" },
+      { token: "cite", field: "cite", owner: "reference" },
+      { token: "sec", field: "sec", owner: "reference" },
+      // A hash is base36 already, so it is the one value written through unescaped.
+      { token: "line", field: "hash", owner: "code", raw: true }
+    ];
+    var ANCHORS2 = {};
+    var FIELDS = [];
+    var OWNERS = {};
+    for (const a of ANCHOR_LIST) {
+      ANCHORS2[a.token] = a.field;
+      FIELDS.push(a.field);
+      (OWNERS[a.owner] = OWNERS[a.owner] || []).push(a.field);
+    }
+    var TOKEN2 = new RegExp("^(" + ANCHOR_LIST.map((a) => a.token).join("|") + "):(.+)$");
     function ownerOf(binding) {
       if (!binding)
         return null;
@@ -517,27 +533,24 @@ var require_binding = __commonJS({
       const s = String(title || "").trim();
       if (!s)
         return null;
-      const b = { sym: "", kind: "", sec: "", cite: "", hash: "" };
+      const b = {};
+      for (const f of FIELDS)
+        b[f] = "";
       for (const word of s.split(/\s+/)) {
-        const m = TOKEN.exec(word);
+        const m = TOKEN2.exec(word);
         if (!m)
           return null;
-        b[ANCHORS[m[1]]] = decodeValue(m[2]);
+        b[ANCHORS2[m[1]]] = decodeValue(m[2]);
       }
-      return b.sym || b.kind || b.sec || b.cite || b.hash ? b : null;
+      return FIELDS.some((f) => b[f]) ? b : null;
     }
     function formatBinding2(b) {
       const parts = [];
-      if (b.sym)
-        parts.push("sym:" + encodeValue(b.sym));
-      if (b.kind)
-        parts.push("kind:" + encodeValue(b.kind));
-      if (b.cite)
-        parts.push("cite:" + encodeValue(b.cite));
-      if (b.sec)
-        parts.push("sec:" + encodeValue(b.sec));
-      if (b.hash)
-        parts.push("line:" + b.hash);
+      for (const a of ANCHOR_LIST) {
+        const v = b[a.field];
+        if (v)
+          parts.push(a.token + ":" + (a.raw ? v : encodeValue(v)));
+      }
       return parts.join(" ");
     }
     function bindStateFrom2(hits, stored) {
@@ -548,7 +561,7 @@ var require_binding = __commonJS({
       const line = hits.reduce((a, n) => Math.abs(n - stored) < Math.abs(a - stored) ? n : a);
       return { state: "stale", line };
     }
-    module2.exports = { LINE_RE: LINE_RE2, PAGE_RE, OWNERS, hashLine: hashLine2, parseBinding: parseBinding2, formatBinding: formatBinding2, bindStateFrom: bindStateFrom2, ownerOf, bindingOwner: bindingOwner2, ownsBinding };
+    module2.exports = { LINE_RE: LINE_RE2, PAGE_RE, ANCHORS: ANCHORS2, OWNERS, hashLine: hashLine2, parseBinding: parseBinding2, formatBinding: formatBinding2, bindStateFrom: bindStateFrom2, ownerOf, bindingOwner: bindingOwner2, ownsBinding };
   }
 });
 
@@ -873,6 +886,11 @@ var require_common = __commonJS({
       "modal.andMore": "\u2026and {n} more",
       "btn.apply": "Apply",
       "btn.cancel": "Cancel",
+      "btn.close": "Close",
+      "label.thisNote": "This note",
+      "modal.update.summary": "{links} change(s) across {files} note(s). Uncheck any change to skip it, or a note to skip all of its changes.",
+      "modal.update.upToDate": "Everything is up to date \u2014 nothing to update.",
+      "notice.updateSkipped": "({n} note(s) skipped \u2014 changed since the preview)",
       "set.heading.maintenance": "Maintenance",
       "set.rebuild.button": "Rebuild",
       "set.precedence.name": "Priority among linker plugins",
@@ -885,6 +903,11 @@ var require_common = __commonJS({
       "modal.andMore": "\u2026\u0438 \u0435\u0449\u0451 {n}",
       "btn.apply": "\u041F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C",
       "btn.cancel": "\u041E\u0442\u043C\u0435\u043D\u0430",
+      "btn.close": "\u0417\u0430\u043A\u0440\u044B\u0442\u044C",
+      "label.thisNote": "\u042D\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430",
+      "modal.update.summary": "\u041F\u0440\u0430\u0432\u043E\u043A \u2014 {links} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}. \u0421\u043D\u0438\u043C\u0438\u0442\u0435 \u0433\u0430\u043B\u043E\u0447\u043A\u0443 \u0441 \u043F\u0440\u0430\u0432\u043A\u0438, \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0435\u0451, \u0438\u043B\u0438 \u0441 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u2014 \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0432\u0441\u0435 \u0435\u0451 \u043F\u0440\u0430\u0432\u043A\u0438.",
+      "modal.update.upToDate": "\u0412\u0441\u0451 \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u043E \u2014 \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E.",
+      "notice.updateSkipped": "(\u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u2014 {n}: \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u0438\u0441\u044C \u043F\u043E\u0441\u043B\u0435 \u043F\u0440\u0435\u0434\u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0430)",
       "set.heading.maintenance": "\u041E\u0431\u0441\u043B\u0443\u0436\u0438\u0432\u0430\u043D\u0438\u0435",
       "set.rebuild.button": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C",
       "set.precedence.name": "\u041F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442 \u0441\u0440\u0435\u0434\u0438 \u043F\u043B\u0430\u0433\u0438\u043D\u043E\u0432-\u043B\u0438\u043D\u043A\u0435\u0440\u043E\u0432",
@@ -1301,16 +1324,11 @@ var require_sigil = __commonJS({
       "menu.convert": "Find and convert to link",
       "menu.convert.group": "Find and convert to link",
       "menu.open.group": "Find and open",
-      "notice.updateSkipped": "({n} note(s) skipped \u2014 changed since the preview)",
       "embed.menu.refresh": "Refresh embed",
       "embed.tool.more": "More actions",
       "embed.tool.open": "Open",
       "embed.tool.refresh": "Refresh",
       "modal.embedPlaceholder": "Choose an embed format\u2026",
-      "modal.update.summary": "{links} change(s) across {files} note(s). Uncheck any change to skip it, or a note to skip all of its changes.",
-      "modal.update.upToDate": "Everything is up to date \u2014 nothing to update.",
-      "btn.close": "Close",
-      "label.thisNote": "This note",
       "set.heading.suggestions": "Suggestions & links",
       "set.heading.hover": "Hover preview",
       "set.heading.links": "Links",
@@ -1337,22 +1355,21 @@ var require_sigil = __commonJS({
       "set.contextMenu.name": "Editor context menu",
       "set.markStaleLinks.name": "Mark stale links",
       "set.info.unknownRoot": "(unknown)",
-      "plural.entry": { one: "{n} entry", other: "{n} entries" }
+      "plural.entry": { one: "{n} entry", other: "{n} entries" },
+      "plural.key": { one: "{n} key", other: "{n} keys" },
+      "plural.note": { one: "{n} note", other: "{n} notes" },
+      "plural.staleLink": { one: "{n} stale link", other: "{n} stale links" },
+      "plural.brokenLink": { one: "{n} broken link", other: "{n} broken links" }
     };
     var ru = {
       "menu.convert": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
       "menu.convert.group": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
       "menu.open.group": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C",
-      "notice.updateSkipped": "(\u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u2014 {n}: \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u0438\u0441\u044C \u043F\u043E\u0441\u043B\u0435 \u043F\u0440\u0435\u0434\u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0430)",
       "embed.menu.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C embed",
       "embed.tool.more": "\u0415\u0449\u0451 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044F",
       "embed.tool.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C",
       "embed.tool.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C",
       "modal.embedPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 embed\u2026",
-      "modal.update.summary": "\u041F\u0440\u0430\u0432\u043E\u043A \u2014 {links} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}. \u0421\u043D\u0438\u043C\u0438\u0442\u0435 \u0433\u0430\u043B\u043E\u0447\u043A\u0443 \u0441 \u043F\u0440\u0430\u0432\u043A\u0438, \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0435\u0451, \u0438\u043B\u0438 \u0441 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u2014 \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0432\u0441\u0435 \u0435\u0451 \u043F\u0440\u0430\u0432\u043A\u0438.",
-      "modal.update.upToDate": "\u0412\u0441\u0451 \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u043E \u2014 \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E.",
-      "btn.close": "\u0417\u0430\u043A\u0440\u044B\u0442\u044C",
-      "label.thisNote": "\u042D\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430",
       "set.heading.suggestions": "\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438 \u0438 \u0441\u0441\u044B\u043B\u043A\u0438",
       "set.heading.hover": "\u041F\u0440\u0435\u0432\u044C\u044E \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438",
       "set.heading.links": "\u0421\u0441\u044B\u043B\u043A\u0438",
@@ -1379,7 +1396,11 @@ var require_sigil = __commonJS({
       "set.contextMenu.name": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430",
       "set.markStaleLinks.name": "\u041E\u0442\u043C\u0435\u0447\u0430\u0442\u044C \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0435 \u0441\u0441\u044B\u043B\u043A\u0438",
       "set.info.unknownRoot": "(\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E)",
-      "plural.entry": { one: "{n} \u0437\u0430\u043F\u0438\u0441\u044C", few: "{n} \u0437\u0430\u043F\u0438\u0441\u0438", many: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439", other: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439" }
+      "plural.entry": { one: "{n} \u0437\u0430\u043F\u0438\u0441\u044C", few: "{n} \u0437\u0430\u043F\u0438\u0441\u0438", many: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439", other: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439" },
+      "plural.key": { one: "{n} \u043A\u043B\u044E\u0447", few: "{n} \u043A\u043B\u044E\u0447\u0430", many: "{n} \u043A\u043B\u044E\u0447\u0435\u0439", other: "{n} \u043A\u043B\u044E\u0447\u0435\u0439" },
+      "plural.note": { one: "{n} \u0437\u0430\u043C\u0435\u0442\u043A\u0435", few: "{n} \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445", many: "{n} \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445", other: "{n} \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445" },
+      "plural.staleLink": { one: "{n} \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0430\u044F \u0441\u0441\u044B\u043B\u043A\u0430", few: "{n} \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0435 \u0441\u0441\u044B\u043B\u043A\u0438", many: "{n} \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0445 \u0441\u0441\u044B\u043B\u043E\u043A", other: "{n} \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0445 \u0441\u0441\u044B\u043B\u043E\u043A" },
+      "plural.brokenLink": { one: "{n} \u0431\u0438\u0442\u0430\u044F \u0441\u0441\u044B\u043B\u043A\u0430", few: "{n} \u0431\u0438\u0442\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438", many: "{n} \u0431\u0438\u0442\u044B\u0445 \u0441\u0441\u044B\u043B\u043E\u043A", other: "{n} \u0431\u0438\u0442\u044B\u0445 \u0441\u0441\u044B\u043B\u043E\u043A" }
     };
     module2.exports = { en, ru };
   }
@@ -1991,6 +2012,7 @@ var require_suggest = __commonJS({
           const f = this.plugin.parseQuery(ctx.query);
           const allowed = prepare(this.plugin);
           const pass = (e) => allowed(e) && this.plugin.entryPassesFilter(e, f);
+          const against = this.plugin.matchTextFor ? (e) => this.plugin.matchTextFor(e, f) : (e) => e.name;
           if (!f.name) {
             const out = [];
             for (const e of idx) {
@@ -2007,7 +2029,7 @@ var require_suggest = __commonJS({
           for (const e of idx) {
             if (!pass(e))
               continue;
-            const r = match(e.name);
+            const r = match(against(e));
             if (r)
               scored.push({ e, score: r.score });
           }
@@ -2056,30 +2078,79 @@ var require_suggest2 = __commonJS({
   }
 });
 
-// src/filter.js
-var require_filter = __commonJS({
-  "src/filter.js"(exports2, module2) {
+// src/shared/facets.js
+var require_facets = __commonJS({
+  "src/shared/facets.js"(exports2, module2) {
     "use strict";
-    function parseQuery(raw, resolveLang, kinds) {
-      const f = { lang: null, kind: null, container: null, name: "" };
+    var { ANCHORS: ANCHORS2 } = require_binding();
+    var VALUE2 = "value";
+    var TOKEN2 = "token";
+    var byName = (facets2, name) => facets2.find((f) => f.name === name) || null;
+    function parseQuery(raw, facets2) {
+      const values = {};
+      let field = null;
       const parts = String(raw == null ? "" : raw).split(":");
       let i = 0;
       for (; i < parts.length - 1; i++) {
-        const id = resolveLang(parts[i]);
-        if (id)
-          f.lang = id;
-        else if (kinds.has(parts[i]))
-          f.kind = parts[i];
-        else
+        const named = facets2.find((f) => f.typed === TOKEN2 && f.name === parts[i]);
+        if (named) {
+          field = named.name;
+          i += 1;
           break;
+        }
+        let hit = null;
+        for (const f of facets2) {
+          if (f.typed !== VALUE2)
+            continue;
+          const v = f.resolve(parts[i]);
+          if (v != null) {
+            hit = { name: f.name, value: v };
+            break;
+          }
+        }
+        if (!hit)
+          break;
+        values[hit.name] = hit.value;
       }
-      const segs = parts.slice(i).join(":").split(".");
-      f.name = segs[segs.length - 1];
-      if (segs.length > 1 && segs[segs.length - 2])
-        f.container = segs[segs.length - 2];
-      return f;
+      return { values, field, name: parts.slice(i).join(":") };
     }
-    module2.exports = { parseQuery };
+    function passes(entry, parsed, facets2) {
+      for (const name of Object.keys(parsed.values)) {
+        const f = byName(facets2, name);
+        if (f && f.of(entry) !== parsed.values[name])
+          return false;
+      }
+      if (parsed.field) {
+        const f = byName(facets2, parsed.field);
+        if (f && !f.of(entry))
+          return false;
+      }
+      return true;
+    }
+    function matchText(entry, parsed, facets2) {
+      const f = parsed.field ? byName(facets2, parsed.field) : null;
+      return f ? f.of(entry) : entry.name;
+    }
+    function bindingFrom(entry, facets2) {
+      const b = {};
+      for (const f of facets2) {
+        if (!f.anchor || !f.of)
+          continue;
+        const v = f.of(entry);
+        if (v)
+          b[ANCHORS2[f.anchor]] = v;
+      }
+      return b;
+    }
+    function entriesFor(plugin, parsed, facets2) {
+      if (!parsed.field)
+        return plugin.entriesByName(parsed.name);
+      const want = String(parsed.name || "").toLowerCase();
+      if (!want)
+        return [];
+      return plugin.index.filter((e) => String(matchText(e, parsed, facets2) || "").toLowerCase() === want);
+    }
+    module2.exports = { VALUE: VALUE2, TOKEN: TOKEN2, parseQuery, passes, matchText, bindingFrom, entriesFor };
   }
 });
 
@@ -2672,7 +2743,7 @@ var require_embed = __commonJS({
       if (looksLikePath(target))
         return fromPath(plugin, spec, target, null, null, null);
       const f = plugin.parseQuery(target);
-      const matches = plugin.entriesByName(f.name).filter((m) => plugin.entryPassesFilter(m, f));
+      const matches = plugin.entriesForQuery(f).filter((m) => plugin.entryPassesFilter(m, f));
       if (!matches.length)
         return { error: t2("embed.notFound", { query: target }) };
       const paths = new Set(matches.map((m) => m.path));
@@ -3132,7 +3203,7 @@ var require_update_preview = __commonJS({
       const c = rewrite(plugin, original, null);
       openUpdatePreview(plugin, [{ file, label: file.path, original, changes: c.changes, broken: c.broken }], rewrite, prefix);
     }
-    async function updateInVault(plugin, rewrite, prefix) {
+    async function scanVault(plugin, rewrite) {
       const entries = [];
       for (const f of plugin.app.vault.getMarkdownFiles()) {
         const original = await plugin.app.vault.read(f);
@@ -3140,9 +3211,12 @@ var require_update_preview = __commonJS({
         if (c.changes.length || c.broken.length)
           entries.push({ file: f, label: f.path, original, changes: c.changes, broken: c.broken });
       }
-      openUpdatePreview(plugin, entries, rewrite, prefix);
+      return entries;
     }
-    module2.exports = { UpdatePreviewModal, applyUpdates, openUpdatePreview, updateInActiveNote, updateInVault };
+    async function updateInVault(plugin, rewrite, prefix) {
+      openUpdatePreview(plugin, await scanVault(plugin, rewrite), rewrite, prefix);
+    }
+    module2.exports = { UpdatePreviewModal, applyUpdates, openUpdatePreview, updateInActiveNote, updateInVault, scanVault };
   }
 });
 
@@ -3270,7 +3344,7 @@ var require_actualize2 = __commonJS({
         return this.rewriteVault(pinLinksInText(anchors), "notice.linksPinnedVault");
       }
     };
-    module2.exports = { methods, staleLinksExtension, refreshStaleLinks };
+    module2.exports = { methods, staleLinksExtension, refreshStaleLinks, rewriteUpdates };
   }
 });
 
@@ -3387,6 +3461,185 @@ var require_modal = __commonJS({
       }
     };
     module2.exports = { CodeLinkModal: CodeLinkModal2, PresetPickerModal: PresetPickerModal2, LinePromptModal: LinePromptModal2, PinAnchorModal: PinAnchorModal2 };
+  }
+});
+
+// src/index-view.js
+var require_index_view = __commonJS({
+  "src/index-view.js"(exports2, module2) {
+    "use strict";
+    var { ItemView, Notice: Notice2 } = require("obsidian");
+    var { t: t2, plural: plural2 } = require_i18n();
+    var { scanVault } = require_update_preview();
+    var { rewriteUpdates } = require_actualize2();
+    var INDEX_VIEW_TYPE2 = "code-index";
+    var CodeIndexView2 = class extends ItemView {
+      constructor(leaf, plugin) {
+        super(leaf);
+        this.plugin = plugin;
+        this.query = "";
+        this.open = /* @__PURE__ */ new Set();
+        this.notes = null;
+      }
+      getViewType() {
+        return INDEX_VIEW_TYPE2;
+      }
+      getDisplayText() {
+        return t2("view.index.title");
+      }
+      getIcon() {
+        return "file-code";
+      }
+      async onOpen() {
+        this.contentEl.addClass("code-linker-index");
+        this.unsubscribe = this.plugin.onIndexChange(() => this.render());
+        this.render();
+      }
+      async onClose() {
+        if (this.unsubscribe)
+          this.unsubscribe();
+      }
+      render() {
+        const root = this.contentEl;
+        root.empty();
+        this.renderSearch(root);
+        this.renderIndex(root);
+        this.renderLinks(root);
+      }
+      head(el, label, count) {
+        const h = el.createDiv({ cls: "code-linker-index-head" });
+        h.createSpan({ text: count == null ? label : `${label} (${count})` });
+        return h;
+      }
+      renderSearch(root) {
+        const bar = root.createDiv({ cls: "code-linker-index-bar" });
+        const input = bar.createEl("input", { type: "search", placeholder: t2("view.index.search") });
+        input.value = this.query;
+        input.oninput = () => {
+          this.query = input.value;
+          this.renderMatches();
+        };
+        bar.createEl("button", { text: t2("view.index.rebuild") }).onclick = () => this.plugin.rebuildIndex(true);
+        this.matchesEl = root.createDiv();
+        this.renderMatches();
+      }
+      // Matching is by name, not by the inline filter grammar: a panel is for looking, and the
+      // trigger in a note is where a query belongs.
+      renderMatches() {
+        if (!this.matchesEl)
+          return;
+        const el = this.matchesEl;
+        el.empty();
+        const q = this.query.trim().toLowerCase();
+        if (!q)
+          return;
+        const hits = this.plugin.index.filter((e) => e.name.toLowerCase().includes(q)).slice(0, 50);
+        this.head(el, t2("view.index.matches"), hits.length);
+        if (!hits.length) {
+          el.createDiv({ cls: "code-linker-index-empty", text: t2("view.index.noMatches") });
+          return;
+        }
+        for (const e of hits)
+          this.entryRow(el, e);
+      }
+      entryRow(el, e) {
+        const row = el.createDiv({ cls: "code-linker-index-row" });
+        const name = row.createSpan({ cls: "code-linker-index-name is-link", text: e.name });
+        name.onclick = () => this.plugin.withFormat(this.plugin.settings.askOnInsert, (tpl) => this.plugin.openEntry(e, tpl));
+        row.createSpan({ cls: "code-linker-index-kind", text: e.kind });
+        row.createSpan({ cls: "code-linker-index-path", text: e.path });
+        const copy = row.createSpan({ cls: "code-linker-index-act is-link", text: t2("view.index.copy") });
+        copy.onclick = () => this.plugin.withFormat(this.plugin.settings.askOnInsert, (tpl) => this.plugin.copyLink(e, tpl));
+      }
+      // Languages, and the kinds inside each. Counting is over the whole index rather than the
+      // enabled kinds: what was scanned is the question here, not what a query would offer.
+      renderIndex(root) {
+        const el = root.createDiv();
+        const byLang = /* @__PURE__ */ new Map();
+        for (const e of this.plugin.index) {
+          const kinds = byLang.get(e.lang) || /* @__PURE__ */ new Map();
+          kinds.set(e.kind, (kinds.get(e.kind) || 0) + 1);
+          byLang.set(e.lang, kinds);
+        }
+        this.head(el, t2("view.index.index"), this.plugin.index.length);
+        if (!byLang.size) {
+          el.createDiv({ cls: "code-linker-index-empty", text: t2("view.index.empty") });
+          return;
+        }
+        const langs = [...byLang.keys()].sort();
+        for (const lang of langs) {
+          const kinds = byLang.get(lang);
+          const total = [...kinds.values()].reduce((a, b) => a + b, 0);
+          const open = this.open.has(lang);
+          const row = el.createDiv({ cls: "code-linker-index-row is-toggle" });
+          row.createSpan({ cls: "code-linker-index-caret", text: open ? "\u25BE" : "\u25B8" });
+          row.createSpan({ cls: "code-linker-index-name", text: this.languageName(lang) });
+          row.createSpan({ cls: "code-linker-index-count", text: String(total) });
+          row.onclick = () => {
+            if (open)
+              this.open.delete(lang);
+            else
+              this.open.add(lang);
+            this.render();
+          };
+          if (!open)
+            continue;
+          for (const kind of [...kinds.keys()].sort()) {
+            const sub = el.createDiv({ cls: "code-linker-index-row is-sub" });
+            sub.createSpan({ cls: "code-linker-index-name", text: kind });
+            sub.createSpan({ cls: "code-linker-index-count", text: String(kinds.get(kind)) });
+          }
+        }
+      }
+      renderLinks(root) {
+        const el = root.createDiv();
+        const h = this.head(el, t2("view.index.links"), this.notes ? this.notes.length : null);
+        h.createEl("button", { text: t2("view.index.scan") }).onclick = () => this.scan();
+        if (!this.notes) {
+          el.createDiv({ cls: "code-linker-index-empty", text: t2("view.index.notScanned") });
+          return;
+        }
+        if (!this.notes.length) {
+          el.createDiv({ cls: "code-linker-index-empty", text: t2("view.index.allWell") });
+          return;
+        }
+        const stale = this.notes.reduce((n, x) => n + x.changes.length, 0);
+        const broken = this.notes.reduce((n, x) => n + x.broken.length, 0);
+        const sum = el.createDiv({ cls: "code-linker-index-summary" });
+        sum.createSpan({ text: t2("view.index.found", { stale: plural2("staleLink", stale), broken: plural2("brokenLink", broken) }) });
+        if (stale) {
+          sum.createEl("button", { text: t2("view.index.fixAll"), cls: "mod-cta" }).onclick = () => this.plugin.updateLinksInVault();
+        }
+        for (const n of this.notes) {
+          const row = el.createDiv({ cls: "code-linker-index-row" });
+          const name = row.createSpan({ cls: "code-linker-index-name is-link", text: n.label });
+          name.onclick = () => this.app.workspace.openLinkText(n.file.path, "", false);
+          if (n.changes.length)
+            row.createSpan({ cls: "code-linker-index-count", text: plural2("staleLink", n.changes.length) });
+          if (n.broken.length)
+            row.createSpan({ cls: "code-linker-index-count is-broken", text: plural2("brokenLink", n.broken.length) });
+        }
+      }
+      // A language the index carries may have been switched off since; its id is still better than
+      // nothing, so it stands in rather than the row vanishing.
+      languageName(id) {
+        const l = (this.plugin.languages || []).find((x) => x.id === id);
+        return l && l.name || id;
+      }
+      // The walk reads every note, so one unreadable or concurrently deleted file must not leave
+      // the button doing nothing and a rejection in the console. A failed scan stays "not scanned"
+      // rather than empty: an empty result reads as "every link lands", which it did not prove.
+      async scan() {
+        try {
+          this.notes = await scanVault(this.plugin, rewriteUpdates);
+        } catch (e) {
+          this.notes = null;
+          new Notice2(t2("view.index.scanFailed"));
+        }
+        this.render();
+      }
+    };
+    module2.exports = { CodeIndexView: CodeIndexView2, INDEX_VIEW_TYPE: INDEX_VIEW_TYPE2 };
   }
 });
 
@@ -3575,6 +3828,21 @@ var require_folder_list = __commonJS({
   }
 });
 
+// src/shared/settings-redraw.js
+var require_settings_redraw = __commonJS({
+  "src/shared/settings-redraw.js"(exports2, module2) {
+    "use strict";
+    function redraw(tab, draw) {
+      const el = tab && tab.containerEl;
+      const top = el ? el.scrollTop || 0 : 0;
+      draw();
+      if (el && top)
+        el.scrollTop = top;
+    }
+    module2.exports = { redraw };
+  }
+});
+
 // src/shared/precedence.js
 var require_precedence = __commonJS({
   "src/shared/precedence.js"(exports2, module2) {
@@ -3696,6 +3964,7 @@ var require_settings_tab = __commonJS({
     var { DiskPathSuggest, suggestAvailable } = require_disk_suggest();
     var { renderFolderList } = require_folder_list();
     var { t: t2, plural: plural2 } = require_i18n();
+    var { redraw } = require_settings_redraw();
     var { renderPrecedenceSetting: precedenceSetting } = require_precedence();
     var normFolder = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "").trim();
     var CodeLinkerSettingTab2 = class extends PluginSettingTab {
@@ -3757,7 +4026,11 @@ var require_settings_tab = __commonJS({
           row.settingEl.addClass("code-linker-kind-row");
         }
       }
+      // Every fold and toggle redraws the whole pane; the reader keeps their place (shared/settings-redraw).
       display() {
+        redraw(this, () => this.draw());
+      }
+      draw() {
         const { containerEl } = this;
         containerEl.empty();
         const s = this.plugin.settings;
@@ -4019,6 +4292,11 @@ var require_settings_tab = __commonJS({
           s.showStatusBar = v;
           await save(false);
         }));
+        new Setting(containerEl).setName(t2("set.ribbon.name")).setDesc(t2("set.ribbon.desc")).addToggle((c) => c.setValue(s.showRibbonIcon).onChange(async (v) => {
+          s.showRibbonIcon = v;
+          await save(false);
+          this.plugin.applyRibbonIcon();
+        }));
         new Setting(containerEl).setName(t2("set.contextMenu.name")).setDesc(t2("set.contextMenu.desc")).addToggle((c) => c.setValue(s.contextMenu).onChange(async (v) => {
           s.contextMenu = v;
           await save(false);
@@ -4185,6 +4463,25 @@ var require_en = __commonJS({
     module2.exports = {
       // Commands
       "cmd.rebuildIndex": "Rebuild code index",
+      "cmd.openIndex": "Open the code index panel",
+      "ribbon.tooltip": "Code index",
+      "view.index.title": "Code index",
+      "view.index.search": "Find a symbol\u2026",
+      "view.index.rebuild": "Rebuild",
+      "view.index.matches": "Matches",
+      "view.index.noMatches": "Nothing in the index answers to that.",
+      "view.index.copy": "copy",
+      "view.index.index": "Indexed",
+      "view.index.empty": "The index is empty \u2014 check the code root and the scan folders.",
+      "view.index.links": "Links in the vault",
+      "view.index.scan": "Scan",
+      "view.index.notScanned": "Scanning reads every note, so it runs when you ask.",
+      "view.index.allWell": "Every code link still lands where it points.",
+      "view.index.found": "{stale}, {broken}",
+      "view.index.fixAll": "Fix all\u2026",
+      "view.index.scanFailed": "Could not read every note \u2014 the scan stopped.",
+      "set.ribbon.name": "Ribbon icon",
+      "set.ribbon.desc": "Show a ribbon button that opens the code index panel.",
       "cmd.insertLink": "Insert code link",
       "cmd.insertLinkAs": "Insert code link as\u2026",
       "cmd.switchPreset": "Switch editor preset",
@@ -4351,6 +4648,25 @@ var require_ru = __commonJS({
     module2.exports = {
       // Commands
       "cmd.rebuildIndex": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043A\u043E\u0434\u0430",
+      "cmd.openIndex": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u0430\u043D\u0435\u043B\u044C \u0438\u043D\u0434\u0435\u043A\u0441\u0430 \u043A\u043E\u0434\u0430",
+      "ribbon.tooltip": "\u0418\u043D\u0434\u0435\u043A\u0441 \u043A\u043E\u0434\u0430",
+      "view.index.title": "\u0418\u043D\u0434\u0435\u043A\u0441 \u043A\u043E\u0434\u0430",
+      "view.index.search": "\u041D\u0430\u0439\u0442\u0438 \u0441\u0438\u043C\u0432\u043E\u043B\u2026",
+      "view.index.rebuild": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C",
+      "view.index.matches": "\u041D\u0430\u0439\u0434\u0435\u043D\u043E",
+      "view.index.noMatches": "\u0412 \u0438\u043D\u0434\u0435\u043A\u0441\u0435 \u043D\u0438\u0447\u0435\u0433\u043E \u0442\u0430\u043A\u043E\u0433\u043E \u043D\u0435\u0442.",
+      "view.index.copy": "\u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C",
+      "view.index.index": "\u0412 \u0438\u043D\u0434\u0435\u043A\u0441\u0435",
+      "view.index.empty": "\u0418\u043D\u0434\u0435\u043A\u0441 \u043F\u0443\u0441\u0442 \u2014 \u043F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u043A\u043E\u0440\u0435\u043D\u044C \u043A\u043E\u0434\u0430 \u0438 \u043F\u0430\u043F\u043A\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F.",
+      "view.index.links": "\u0421\u0441\u044B\u043B\u043A\u0438 \u0432 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
+      "view.index.scan": "\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C",
+      "view.index.notScanned": "\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0447\u0438\u0442\u0430\u0435\u0442 \u0432\u0441\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0438, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F \u043F\u043E \u0442\u0440\u0435\u0431\u043E\u0432\u0430\u043D\u0438\u044E.",
+      "view.index.allWell": "\u0412\u0441\u0435 \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u043A\u043E\u0434 \u0432\u0435\u0434\u0443\u0442 \u0442\u0443\u0434\u0430, \u043A\u0443\u0434\u0430 \u0443\u043A\u0430\u0437\u044B\u0432\u0430\u044E\u0442.",
+      "view.index.found": "{stale}, {broken}",
+      "view.index.fixAll": "\u0418\u0441\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0432\u0441\u0451\u2026",
+      "view.index.scanFailed": "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C \u0432\u0441\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u2014 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043F\u0440\u0435\u0440\u0432\u0430\u043D\u0430.",
+      "set.ribbon.name": "\u0418\u043A\u043E\u043D\u043A\u0430 \u043D\u0430 \u043F\u0430\u043D\u0435\u043B\u0438",
+      "set.ribbon.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043A\u043D\u043E\u043F\u043A\u0443 \u0441\u043B\u0435\u0432\u0430, \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0449\u0443\u044E \u043F\u0430\u043D\u0435\u043B\u044C \u0438\u043D\u0434\u0435\u043A\u0441\u0430 \u043A\u043E\u0434\u0430.",
       "cmd.insertLink": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434",
       "cmd.insertLinkAs": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043A\u043E\u0434 \u043A\u0430\u043A\u2026",
       "cmd.switchPreset": "\u0421\u043C\u0435\u043D\u0438\u0442\u044C \u043F\u0440\u0435\u0441\u0435\u0442 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430",
@@ -4518,7 +4834,7 @@ var { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPL
 var { compileGitignore, isIgnored } = require_gitignore();
 var { watchTree } = require_fs_watch();
 var { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require_markdown();
-var { LINE_RE, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require_binding();
+var { LINE_RE, ANCHORS, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require_binding();
 var { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require_root_token();
 var { menuSection } = require_menu();
 var { buildMenu } = require_menu_verbs();
@@ -4532,11 +4848,13 @@ var PRODUCT_PLACEHOLDER = /{(?:jetbrainsProduct|product)}/;
 var MAX_PARSE_LINE_LENGTH = 2e3;
 var { BUILTIN_LANGUAGES } = require_builtin_languages();
 var { CodeIndexSuggest } = require_suggest2();
-var filter = require_filter();
+var facets = require_facets();
+var { VALUE, TOKEN } = facets;
 var { HoverPreview } = require_hover();
 var { registerEmbed, parseSpec, splitPathRange, resolvePath } = require_embed();
 var actualize = require_actualize2();
 var { CodeLinkModal, PresetPickerModal, LinePromptModal, PinAnchorModal } = require_modal();
+var { CodeIndexView, INDEX_VIEW_TYPE } = require_index_view();
 var { CodeLinkerSettingTab } = require_settings_tab();
 var { initI18n, withFamily, t, plural } = require_i18n();
 var api = require_api();
@@ -4596,6 +4914,9 @@ var CodeLinkerPlugin = class extends Plugin {
     this.editorStatusEl.setAttribute("aria-label", t("status.editorTooltip"));
     this.registerDomEvent(this.editorStatusEl, "click", () => this.switchPreset());
     this.updateStatusBar();
+    this.registerView(INDEX_VIEW_TYPE, (leaf) => new CodeIndexView(leaf, this));
+    this.applyRibbonIcon();
+    this.addCommand({ id: "open-code-index", name: t("cmd.openIndex"), callback: () => this.activateIndexView() });
     this.addCommand({ id: "rebuild-code-index", name: t("cmd.rebuildIndex"), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: "insert-code-link", name: t("cmd.insertLink"), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLink(editor, e, tpl))) });
     this.addCommand({ id: "insert-code-link-as", name: t("cmd.insertLinkAs"), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(true, (tpl) => this.insertLink(editor, e, tpl))) });
@@ -4981,15 +5302,72 @@ var CodeLinkerPlugin = class extends Plugin {
     const l = tok && this.languages.find((l2) => l2.id === tok || l2.name.toLowerCase() === tok || l2.extensions.includes("." + tok));
     return l ? l.id : null;
   }
+  // Every way an entry can be addressed, built once: the suggest asks per entry over the whole
+  // index. `sym:` is worth having despite matching what a bare name does, because it is the
+  // only way to ask for a symbol whose own name is a language or kind token.
+  // `pinFrom` reads an anchor's value off a spot in a file rather than off an index entry,
+  // because that is what this plugin pins from: `store` goes into the title, `show` is what the
+  // menu says it pinned to. Null when the anchor can't be met there.
+  buildFacets() {
+    const decl = (site) => this.declAtSite(site);
+    return [
+      { name: "lang", typed: VALUE, resolve: (t2) => this.resolveLangToken(t2), of: (e) => e.lang },
+      {
+        name: "kind",
+        typed: VALUE,
+        resolve: (t2) => this.kinds.has(t2) ? t2 : null,
+        of: (e) => e.kind,
+        anchor: "kind",
+        pinFrom: (site) => {
+          const d = decl(site);
+          return d && d.kind ? { store: d.kind, show: d.kind } : null;
+        }
+      },
+      {
+        name: "sym",
+        typed: TOKEN,
+        of: (e) => e.name,
+        anchor: "sym",
+        pinFrom: (site) => {
+          const d = decl(site);
+          return d ? { store: d.name, show: d.name } : null;
+        }
+      },
+      {
+        name: "line",
+        anchor: "line",
+        // A blank line hashes to nothing the index keeps, so that pin is broken at birth.
+        pinFrom: (site) => site.text.trim() ? { store: hashLine(site.text), show: String(site.line) } : null
+      }
+    ];
+  }
+  pinnable(anchor) {
+    return this.facets().find((f) => f.anchor === anchor && f.pinFrom) || null;
+  }
+  facets() {
+    if (!this.queryFacets)
+      this.queryFacets = this.buildFacets();
+    return this.queryFacets;
+  }
+  // The container is a suffix of the name rather than a prefix of the query, so it is read
+  // here and not by the shared grammar: "Foo.bar" is bar declared beside Foo.
   parseQuery(raw) {
-    return filter.parseQuery(raw, (t2) => this.resolveLangToken(t2), this.kinds);
+    const q = facets.parseQuery(raw, this.facets());
+    const segs = q.name.split(".");
+    q.name = segs[segs.length - 1];
+    q.container = segs.length > 1 && segs[segs.length - 2] ? segs[segs.length - 2] : null;
+    return q;
+  }
+  matchTextFor(e, f) {
+    return facets.matchText(e, f, this.facets());
+  }
+  entriesForQuery(f) {
+    return facets.entriesFor(this, f, this.facets());
   }
   // Whether an entry passes a parsed inline filter (the caller matches the name). A
   // container must be declared in the same file — its class name stands in for the path.
   entryPassesFilter(e, f) {
-    if (f.lang && e.lang !== f.lang)
-      return false;
-    if (f.kind && e.kind !== f.kind)
+    if (!facets.passes(e, f, this.facets()))
       return false;
     if (f.container) {
       const v = this.fileCache.get(e.path);
@@ -5694,6 +6072,26 @@ var CodeLinkerPlugin = class extends Plugin {
   // Resolve {root} to the absolute code root: a copied link is usually pasted outside
   // the vault (a browser, a terminal), where the portable {root} token wouldn't resolve.
   // Inserted links keep {root} for note portability.
+  async activateIndexView() {
+    const { workspace } = this.app;
+    let leaf = workspace.getLeavesOfType(INDEX_VIEW_TYPE)[0];
+    if (!leaf) {
+      leaf = workspace.getRightLeaf(false);
+      if (!leaf)
+        return;
+      await leaf.setViewState({ type: INDEX_VIEW_TYPE, active: true });
+    }
+    workspace.revealLeaf(leaf);
+  }
+  applyRibbonIcon() {
+    const want = this.settings.showRibbonIcon;
+    if (want && !this.ribbonEl) {
+      this.ribbonEl = this.addRibbonIcon("file-code", t("ribbon.tooltip"), () => this.activateIndexView());
+    } else if (!want && this.ribbonEl) {
+      this.ribbonEl.remove();
+      this.ribbonEl = null;
+    }
+  }
   copyLink(e, template) {
     if (this.gitTemplateBlocked(e, template))
       return;
@@ -5839,22 +6237,14 @@ var CodeLinkerPlugin = class extends Plugin {
   // to show. Anchors add up rather than replace, so pinning symbol then kind narrows the
   // same spot. Null when there's nothing to pin to, or when it would change nothing.
   pinOption(site, current, anchor) {
-    if (!site)
+    const f = site && this.pinnable(anchor);
+    const got = f && f.pinFrom(site);
+    if (!got)
       return null;
-    const next = Object.assign({ sym: "", kind: "", hash: "" }, parseBinding(current));
-    let value;
-    if (anchor === "line") {
-      next.hash = hashLine(site.text);
-      value = String(site.line);
-    } else {
-      const decl = this.declAtSite(site);
-      if (!decl)
-        return null;
-      value = anchor === "sym" ? decl.name : decl.kind;
-      next[anchor] = value;
-    }
+    const next = Object.assign({}, parseBinding(current));
+    next[ANCHORS[anchor]] = got.store;
     const title = formatBinding(next);
-    return title === (current || "") ? null : { title, value, site };
+    return title === (current || "") ? null : { title, value: got.show, site };
   }
   linkPinOption(link, anchor) {
     return this.pinOption(this.linkSite(link.target), splitTarget(link.target).title, anchor);
@@ -5866,24 +6256,16 @@ var CodeLinkerPlugin = class extends Plugin {
   buildPinTitle(site, anchors) {
     if (!site)
       return null;
-    const b = { sym: "", kind: "", hash: "" };
-    const decl = anchors.sym || anchors.kind ? this.declAtSite(site) : null;
-    if (anchors.sym) {
-      if (!decl)
+    const b = {};
+    for (const f of this.facets()) {
+      if (!f.pinFrom || !anchors[f.anchor])
+        continue;
+      const got = f.pinFrom(site);
+      if (!got)
         return null;
-      b.sym = decl.name;
+      b[ANCHORS[f.anchor]] = got.store;
     }
-    if (anchors.kind) {
-      if (!decl || !decl.kind)
-        return null;
-      b.kind = decl.kind;
-    }
-    if (anchors.line) {
-      if (!site.text.trim())
-        return null;
-      b.hash = hashLine(site.text);
-    }
-    return b.sym || b.kind || b.hash ? formatBinding(b) : null;
+    return Object.keys(b).length ? formatBinding(b) : null;
   }
   // The spot a ```code-link block's window is frozen at — the same shape linkSite gives,
   // so an embed pins through exactly the code a link does.
