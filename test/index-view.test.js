@@ -69,7 +69,7 @@ describe('the index half', () => {
   it('shows the kinds inside a language only once it is opened', async () => {
     const view = await load();
     assert.ok(!drawn(view).includes('method'));
-    view.open.add('csharp');
+    view.openLangs.add('csharp');
     assert.ok(drawn(view).includes('method'));
   });
 
@@ -78,6 +78,15 @@ describe('the index half', () => {
     const view = await load();
     view.plugin.languages = [];
     assert.ok(drawn(view).includes('csharp'));
+  });
+
+  // Obsidian swallows a throw out of onOpen and leaves the leaf blank, which reads as "nothing
+  // found" rather than "it broke" — the panel has to say which.
+  it('says so when it cannot draw itself, rather than going blank', async () => {
+    const view = await load();
+    view.renderIndex = () => { throw new Error('boom'); };
+    const out = drawn(view);
+    assert.ok(out.includes('boom'), out);
   });
 
   it('says the index is empty rather than drawing nothing', async () => {

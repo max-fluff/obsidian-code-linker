@@ -21,6 +21,7 @@ module.exports = {
   'view.index.allWell': 'Every code link still lands where it points.',
   'view.index.found': '{stale}, {broken}',
   'view.index.fixAll': 'Fix all…',
+  'view.index.failed': 'The panel could not draw itself: {error}',
   'view.index.scanFailed': 'Could not read every note — the scan stopped.',
   'set.ribbon.name': 'Ribbon icon',
   'set.ribbon.desc': 'Show a ribbon button that opens the code index panel.',

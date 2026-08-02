@@ -21,6 +21,7 @@ module.exports = {
   'view.index.allWell': 'Все ссылки на код ведут туда, куда указывают.',
   'view.index.found': '{stale}, {broken}',
   'view.index.fixAll': 'Исправить всё…',
+  'view.index.failed': 'Панель не смогла отрисоваться: {error}',
   'view.index.scanFailed': 'Не удалось прочитать все заметки — проверка прервана.',
   'set.ribbon.name': 'Иконка на панели',
   'set.ribbon.desc': 'Показывать кнопку слева, открывающую панель индекса кода.',

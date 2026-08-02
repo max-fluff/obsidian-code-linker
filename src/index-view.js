@@ -15,7 +15,9 @@ class CodeIndexView extends ItemView {
     super(leaf);
     this.plugin = plugin;
     this.query = '';
-    this.open = new Set();
+    // Not `open`: a plain name on a view risks shadowing something the base class owns, and a
+    // shadowed method fails as a blank pane with nothing said.
+    this.openLangs = new Set();
     this.notes = null; // null until the first scan, so "none" and "not looked" read apart
   }
 
@@ -33,12 +35,19 @@ class CodeIndexView extends ItemView {
     if (this.unsubscribe) this.unsubscribe();
   }
 
+  // A pane that cannot draw itself must say so. Obsidian swallows a throw out of onOpen and
+  // leaves the leaf blank, which reads as "the panel found nothing" rather than "it broke".
   render() {
     const root = this.contentEl;
     root.empty();
-    this.renderSearch(root);
-    this.renderIndex(root);
-    this.renderLinks(root);
+    try {
+      this.renderSearch(root);
+      this.renderIndex(root);
+      this.renderLinks(root);
+    } catch (e) {
+      console.error('Code Linker: the index panel failed to draw', e);
+      root.createDiv({ cls: 'code-linker-index-empty is-error', text: t('view.index.failed', { error: String((e && e.message) || e) }) });
+    }
   }
 
   head(el, label, count) {
@@ -97,12 +106,12 @@ class CodeIndexView extends ItemView {
     for (const lang of langs) {
       const kinds = byLang.get(lang);
       const total = [...kinds.values()].reduce((a, b) => a + b, 0);
-      const open = this.open.has(lang);
+      const open = this.openLangs.has(lang);
       const row = el.createDiv({ cls: 'code-linker-index-row is-toggle' });
       row.createSpan({ cls: 'code-linker-index-caret', text: open ? '▾' : '▸' });
       row.createSpan({ cls: 'code-linker-index-name', text: this.languageName(lang) });
       row.createSpan({ cls: 'code-linker-index-count', text: String(total) });
-      row.onclick = () => { if (open) this.open.delete(lang); else this.open.add(lang); this.render(); };
+      row.onclick = () => { if (open) this.openLangs.delete(lang); else this.openLangs.add(lang); this.render(); };
       if (!open) continue;
       for (const kind of [...kinds.keys()].sort()) {
         const sub = el.createDiv({ cls: 'code-linker-index-row is-sub' });

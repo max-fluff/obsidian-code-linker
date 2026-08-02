@@ -3478,7 +3478,7 @@ var require_index_view = __commonJS({
         super(leaf);
         this.plugin = plugin;
         this.query = "";
-        this.open = /* @__PURE__ */ new Set();
+        this.openLangs = /* @__PURE__ */ new Set();
         this.notes = null;
       }
       getViewType() {
@@ -3499,12 +3499,19 @@ var require_index_view = __commonJS({
         if (this.unsubscribe)
           this.unsubscribe();
       }
+      // A pane that cannot draw itself must say so. Obsidian swallows a throw out of onOpen and
+      // leaves the leaf blank, which reads as "the panel found nothing" rather than "it broke".
       render() {
         const root = this.contentEl;
         root.empty();
-        this.renderSearch(root);
-        this.renderIndex(root);
-        this.renderLinks(root);
+        try {
+          this.renderSearch(root);
+          this.renderIndex(root);
+          this.renderLinks(root);
+        } catch (e) {
+          console.error("Code Linker: the index panel failed to draw", e);
+          root.createDiv({ cls: "code-linker-index-empty is-error", text: t2("view.index.failed", { error: String(e && e.message || e) }) });
+        }
       }
       head(el, label, count) {
         const h = el.createDiv({ cls: "code-linker-index-head" });
@@ -3570,16 +3577,16 @@ var require_index_view = __commonJS({
         for (const lang of langs) {
           const kinds = byLang.get(lang);
           const total = [...kinds.values()].reduce((a, b) => a + b, 0);
-          const open = this.open.has(lang);
+          const open = this.openLangs.has(lang);
           const row = el.createDiv({ cls: "code-linker-index-row is-toggle" });
           row.createSpan({ cls: "code-linker-index-caret", text: open ? "\u25BE" : "\u25B8" });
           row.createSpan({ cls: "code-linker-index-name", text: this.languageName(lang) });
           row.createSpan({ cls: "code-linker-index-count", text: String(total) });
           row.onclick = () => {
             if (open)
-              this.open.delete(lang);
+              this.openLangs.delete(lang);
             else
-              this.open.add(lang);
+              this.openLangs.add(lang);
             this.render();
           };
           if (!open)
@@ -4479,6 +4486,7 @@ var require_en = __commonJS({
       "view.index.allWell": "Every code link still lands where it points.",
       "view.index.found": "{stale}, {broken}",
       "view.index.fixAll": "Fix all\u2026",
+      "view.index.failed": "The panel could not draw itself: {error}",
       "view.index.scanFailed": "Could not read every note \u2014 the scan stopped.",
       "set.ribbon.name": "Ribbon icon",
       "set.ribbon.desc": "Show a ribbon button that opens the code index panel.",
@@ -4664,6 +4672,7 @@ var require_ru = __commonJS({
       "view.index.allWell": "\u0412\u0441\u0435 \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u043A\u043E\u0434 \u0432\u0435\u0434\u0443\u0442 \u0442\u0443\u0434\u0430, \u043A\u0443\u0434\u0430 \u0443\u043A\u0430\u0437\u044B\u0432\u0430\u044E\u0442.",
       "view.index.found": "{stale}, {broken}",
       "view.index.fixAll": "\u0418\u0441\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0432\u0441\u0451\u2026",
+      "view.index.failed": "\u041F\u0430\u043D\u0435\u043B\u044C \u043D\u0435 \u0441\u043C\u043E\u0433\u043B\u0430 \u043E\u0442\u0440\u0438\u0441\u043E\u0432\u0430\u0442\u044C\u0441\u044F: {error}",
       "view.index.scanFailed": "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C \u0432\u0441\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u2014 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043F\u0440\u0435\u0440\u0432\u0430\u043D\u0430.",
       "set.ribbon.name": "\u0418\u043A\u043E\u043D\u043A\u0430 \u043D\u0430 \u043F\u0430\u043D\u0435\u043B\u0438",
       "set.ribbon.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043A\u043D\u043E\u043F\u043A\u0443 \u0441\u043B\u0435\u0432\u0430, \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0449\u0443\u044E \u043F\u0430\u043D\u0435\u043B\u044C \u0438\u043D\u0434\u0435\u043A\u0441\u0430 \u043A\u043E\u0434\u0430.",
