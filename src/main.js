@@ -23,6 +23,8 @@ const { LINE_RE, ANCHORS, hashLine, parseBinding, formatBinding, bindStateFrom, 
 const { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require('./shared/root-token');
 const { menuSection } = require('./shared/menu');
 const { buildMenu } = require('./shared/menu-verbs');
+const { registerActions, menuActions } = require('./shared/actions');
+const { LINK_ACTIONS } = require('./link-actions');
 const { ownsLink } = require('./shared/link-owner');
 const { resolveGit, resolveGitDir } = require('./git');
 
@@ -133,14 +135,9 @@ class CodeLinkerPlugin extends Plugin {
     this.addCommand({ id: 'convert-selection-to-link', name: t('cmd.convertSelection'), editorCallback: (editor) => this.convertSelection(editor) });
     this.addCommand({ id: 'open-selected-code', name: t('cmd.openSelection'), editorCallback: (editor) => this.openSelection(editor) });
     this.addCommand({ id: 'insert-code-link-line', name: t('cmd.insertLineLink'), editorCallback: (editor) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLineLink(editor, tpl)) });
-    // The right-click items on a code link, also in the palette.
-    this.addLinkCommand('copy-code-link-at-cursor', t('menu.copyLink'), () => true, (editor, link) => this.copyLinkAtCursor(link));
-    this.addLinkCommand('fix-code-link', t('menu.fixLink'), (link) => this.isLinkStale(link.target), (editor, link) => this.fixLinkAtCursor(editor, link));
-    for (const anchor of ['sym', 'kind', 'line']) {
-      this.addLinkCommand('pin-code-link-' + anchor, t('cmd.pin.' + anchor),
-        (link) => !!this.linkPinOption(link, anchor), (editor, link) => this.pinLink(editor, link, anchor));
-    }
-    this.addLinkCommand('unpin-code-link', t('menu.unpin'), (link) => this.linkAtCursorBound(link), (editor, link) => this.unbindLink(editor, link));
+    // The right-click items on a code link and their palette twins are one list — see
+    // shared/actions.js.
+    registerActions(this, LINK_ACTIONS);
     this.addCommand({ id: 'pin-links-note', name: t('cmd.pinLinksNote'), callback: () => this.pickPinAnchors((a) => this.pinLinksInActiveNote(a)) });
     this.addCommand({ id: 'pin-links-vault', name: t('cmd.pinLinksVault'), callback: () => this.pickPinAnchors((a) => this.pinLinksInVault(a)) });
     this.addCommand({ id: 'insert-code-embed', name: t('cmd.insertEmbed'), editorCallback: (editor) => this.pickEntry((e) => this.insertEmbed(editor, e)) });
@@ -164,20 +161,9 @@ class CodeLinkerPlugin extends Plugin {
         if (this.selectionTarget(editor, false)) {
           this.selectionItem(menu, 'open', 'file-search', () => this.openSelection(editor));
         }
-        // Right-clicking one of our code links: copy its resolved target, and — if the
-        // stored line has drifted — offer to fix just that link. Ownership is checked so a
-        // link the reference linker recognises too gets one set of actions, not two.
-        const link = this.codeLinkAtCursor(editor);
-        if (link && this.ownsLinkAtCursor(link)) {
-          menu.addItem((item) => item.setTitle(t('menu.copyLink')).setIcon('copy').onClick(() => this.copyLinkAtCursor(link)));
-          if (this.isLinkStale(link.target)) {
-            menu.addItem((item) => item.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fixLinkAtCursor(editor, link)));
-          }
-          this.addPinItems(menu, (a) => this.linkPinOption(link, a), (a) => this.pinLink(editor, link, a));
-          if (this.linkAtCursorBound(link)) {
-            menu.addItem((item) => item.setTitle(t('menu.unpin')).setIcon('pin-off').onClick(() => this.unbindLink(editor, link)));
-          }
-        }
+        // Right-clicking one of our code links: copy its resolved target, fix a drifted one,
+        // pin or unpin it. Declared once with their palette twins — see shared/actions.js.
+        menuActions(this, menu, LINK_ACTIONS, 'editor', editor);
       }))
     );
 
@@ -1554,21 +1540,6 @@ class CodeLinkerPlugin extends Plugin {
     for (const [a, o] of opts) {
       group.addItem((i) => i.setTitle(t('menu.pin.' + a, { value: o.value })).setIcon('pin').onClick(() => run(a)));
     }
-  }
-
-  // A right-click item on the code link under the cursor, mirrored into the palette so
-  // every one of them is reachable without the mouse. `can` gates both.
-  addLinkCommand(id, name, can, run) {
-    this.addCommand({
-      id,
-      name,
-      editorCheckCallback: (checking, editor) => {
-        const link = this.codeLinkAtCursor(editor);
-        if (!link || !this.ownsLinkAtCursor(link) || !can(link)) return false;
-        if (!checking) run(editor, link);
-        return true;
-      },
-    });
   }
 
   // Insert a link to a chosen line of a chosen file — for pointing at something the index

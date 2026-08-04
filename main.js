@@ -1614,6 +1614,137 @@ var require_menu_verbs = __commonJS({
   }
 });
 
+// src/shared/actions.js
+var require_actions = __commonJS({
+  "src/shared/actions.js"(exports2, module2) {
+    "use strict";
+    var { t: t2 } = require_i18n();
+    var drawn = (plugin, a) => typeof a.inMenu !== "function" || !!a.inMenu(plugin);
+    function check(a) {
+      if (!a.id || !a.name || !a.title || !a.run || !a.resolve) {
+        throw new Error("menu action needs id, name, title, resolve and run: " + (a.id || "(no id)"));
+      }
+      return a;
+    }
+    function registerActions2(plugin, actions) {
+      for (const a of actions.map(check)) {
+        const act = (checking, target) => {
+          if (!target)
+            return false;
+          const ctx = a.resolve(plugin, target);
+          if (!ctx)
+            return false;
+          if (!checking)
+            a.run(plugin, ctx);
+          return true;
+        };
+        if (a.surface === "editor") {
+          plugin.addCommand({ id: a.id, name: t2(a.name), editorCheckCallback: (checking, editor) => act(checking, editor) });
+        } else {
+          plugin.addCommand({ id: a.id, name: t2(a.name), checkCallback: (checking) => act(checking, plugin.app.workspace.getActiveFile()) });
+        }
+      }
+    }
+    function menuActions2(plugin, menu, actions, surface, target) {
+      const sections = /* @__PURE__ */ new Map();
+      for (const a of actions.map(check)) {
+        if (a.surface !== surface || !drawn(plugin, a))
+          continue;
+        const ctx = a.resolve(plugin, target);
+        if (!ctx)
+          continue;
+        const write = (i, grouped) => i.setTitle(a.title(ctx, grouped)).setIcon(grouped && a.verb ? null : a.icon || null).onClick(() => a.run(plugin, ctx));
+        if (a.section && menu.section) {
+          const label = typeof a.section === "function" ? a.section(ctx) : t2(a.section);
+          if (!sections.has(label))
+            sections.set(label, menu.section(label, a.icon));
+          sections.get(label).addItem((i) => write(i, true));
+        } else if (a.verb) {
+          menu.tagged(a.verb, { value: a.value ? a.value(ctx) : void 0 }, write);
+        } else {
+          menu.addItem((i) => write(i, false));
+        }
+      }
+    }
+    function cursorReader(compute, stamp = (plugin) => plugin.indexVersion) {
+      let last = { editor: null, key: null, value: null };
+      return (plugin, editor) => {
+        if (!editor)
+          return null;
+        const head = editor.getCursor("head");
+        const sel = editor.getSelection ? editor.getSelection() : "";
+        const key = `${head.line}:${head.ch}:${editor.getLine(head.line)}:${sel}:${stamp(plugin)}`;
+        if (last.editor !== editor || last.key !== key)
+          last = { editor, key, value: compute(plugin, editor) };
+        return last.value;
+      };
+    }
+    module2.exports = { registerActions: registerActions2, menuActions: menuActions2, cursorReader };
+  }
+});
+
+// src/link-actions.js
+var require_link_actions = __commonJS({
+  "src/link-actions.js"(exports2, module2) {
+    "use strict";
+    var { t: t2 } = require_i18n();
+    var linkAt = (plugin, editor) => {
+      const link = editor && plugin.codeLinkAtCursor(editor);
+      return link && plugin.ownsLinkAtCursor(link) ? { editor, link } : null;
+    };
+    var linkAction = ({ id, name, can, run, icon }) => ({
+      id,
+      name,
+      surface: "editor",
+      icon,
+      title: () => t2(name),
+      resolve: (plugin, editor) => {
+        const ctx = linkAt(plugin, editor);
+        return ctx && (!can || can(plugin, ctx.link)) ? ctx : null;
+      },
+      run
+    });
+    var pinAction = (anchor) => ({
+      id: "pin-code-link-" + anchor,
+      name: "cmd.pin." + anchor,
+      surface: "editor",
+      icon: "pin",
+      section: "menu.pin",
+      title: (ctx) => t2("menu.pin." + anchor, { value: ctx.option.value }),
+      resolve: (plugin, editor) => {
+        const ctx = linkAt(plugin, editor);
+        const option = ctx && plugin.linkPinOption(ctx.link, anchor);
+        return option ? Object.assign(ctx, { option }) : null;
+      },
+      run: (plugin, ctx) => plugin.pinLink(ctx.editor, ctx.link, anchor)
+    });
+    var LINK_ACTIONS2 = [
+      linkAction({
+        id: "copy-code-link-at-cursor",
+        name: "menu.copyLink",
+        icon: "copy",
+        run: (plugin, ctx) => plugin.copyLinkAtCursor(ctx.link)
+      }),
+      linkAction({
+        id: "fix-code-link",
+        name: "menu.fixLink",
+        icon: "wrench",
+        can: (plugin, link) => plugin.isLinkStale(link.target),
+        run: (plugin, ctx) => plugin.fixLinkAtCursor(ctx.editor, ctx.link)
+      }),
+      ...["sym", "kind", "line"].map(pinAction),
+      linkAction({
+        id: "unpin-code-link",
+        name: "menu.unpin",
+        icon: "pin-off",
+        can: (plugin, link) => plugin.linkAtCursorBound(link),
+        run: (plugin, ctx) => plugin.unbindLink(ctx.editor, ctx.link)
+      })
+    ];
+    module2.exports = { LINK_ACTIONS: LINK_ACTIONS2 };
+  }
+});
+
 // src/shared/link-owner.js
 var require_link_owner = __commonJS({
   "src/shared/link-owner.js"(exports2, module2) {
@@ -4925,6 +5056,8 @@ var { LINE_RE, ANCHORS, hashLine, parseBinding, formatBinding, bindStateFrom, bi
 var { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require_root_token();
 var { menuSection } = require_menu();
 var { buildMenu } = require_menu_verbs();
+var { registerActions, menuActions } = require_actions();
+var { LINK_ACTIONS } = require_link_actions();
 var { ownsLink } = require_link_owner();
 var { resolveGit, resolveGitDir } = require_git();
 var OWNER = "code";
@@ -5013,17 +5146,7 @@ var CodeLinkerPlugin = class extends Plugin {
     this.addCommand({ id: "convert-selection-to-link", name: t("cmd.convertSelection"), editorCallback: (editor) => this.convertSelection(editor) });
     this.addCommand({ id: "open-selected-code", name: t("cmd.openSelection"), editorCallback: (editor) => this.openSelection(editor) });
     this.addCommand({ id: "insert-code-link-line", name: t("cmd.insertLineLink"), editorCallback: (editor) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLineLink(editor, tpl)) });
-    this.addLinkCommand("copy-code-link-at-cursor", t("menu.copyLink"), () => true, (editor, link) => this.copyLinkAtCursor(link));
-    this.addLinkCommand("fix-code-link", t("menu.fixLink"), (link) => this.isLinkStale(link.target), (editor, link) => this.fixLinkAtCursor(editor, link));
-    for (const anchor of ["sym", "kind", "line"]) {
-      this.addLinkCommand(
-        "pin-code-link-" + anchor,
-        t("cmd.pin." + anchor),
-        (link) => !!this.linkPinOption(link, anchor),
-        (editor, link) => this.pinLink(editor, link, anchor)
-      );
-    }
-    this.addLinkCommand("unpin-code-link", t("menu.unpin"), (link) => this.linkAtCursorBound(link), (editor, link) => this.unbindLink(editor, link));
+    registerActions(this, LINK_ACTIONS);
     this.addCommand({ id: "pin-links-note", name: t("cmd.pinLinksNote"), callback: () => this.pickPinAnchors((a) => this.pinLinksInActiveNote(a)) });
     this.addCommand({ id: "pin-links-vault", name: t("cmd.pinLinksVault"), callback: () => this.pickPinAnchors((a) => this.pinLinksInVault(a)) });
     this.addCommand({ id: "insert-code-embed", name: t("cmd.insertEmbed"), editorCallback: (editor) => this.pickEntry((e) => this.insertEmbed(editor, e)) });
@@ -5039,17 +5162,7 @@ var CodeLinkerPlugin = class extends Plugin {
         if (this.selectionTarget(editor, false)) {
           this.selectionItem(menu, "open", "file-search", () => this.openSelection(editor));
         }
-        const link = this.codeLinkAtCursor(editor);
-        if (link && this.ownsLinkAtCursor(link)) {
-          menu.addItem((item) => item.setTitle(t("menu.copyLink")).setIcon("copy").onClick(() => this.copyLinkAtCursor(link)));
-          if (this.isLinkStale(link.target)) {
-            menu.addItem((item) => item.setTitle(t("menu.fixLink")).setIcon("wrench").onClick(() => this.fixLinkAtCursor(editor, link)));
-          }
-          this.addPinItems(menu, (a) => this.linkPinOption(link, a), (a) => this.pinLink(editor, link, a));
-          if (this.linkAtCursorBound(link)) {
-            menu.addItem((item) => item.setTitle(t("menu.unpin")).setIcon("pin-off").onClick(() => this.unbindLink(editor, link)));
-          }
-        }
+        menuActions(this, menu, LINK_ACTIONS, "editor", editor);
       }))
     );
     this.registerEvent(
@@ -6414,22 +6527,6 @@ var CodeLinkerPlugin = class extends Plugin {
     for (const [a, o] of opts) {
       group.addItem((i) => i.setTitle(t("menu.pin." + a, { value: o.value })).setIcon("pin").onClick(() => run(a)));
     }
-  }
-  // A right-click item on the code link under the cursor, mirrored into the palette so
-  // every one of them is reachable without the mouse. `can` gates both.
-  addLinkCommand(id, name, can, run) {
-    this.addCommand({
-      id,
-      name,
-      editorCheckCallback: (checking, editor) => {
-        const link = this.codeLinkAtCursor(editor);
-        if (!link || !this.ownsLinkAtCursor(link) || !can(link))
-          return false;
-        if (!checking)
-          run(editor, link);
-        return true;
-      }
-    });
   }
   // Insert a link to a chosen line of a chosen file — for pointing at something the index
   // has no name for. Like any insert it leaves the link unbound; pin it to track it.
