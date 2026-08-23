@@ -56,6 +56,7 @@ const { CodeLinkModal, PresetPickerModal, LinePromptModal, PinAnchorModal } = re
 const { CodeIndexView, INDEX_VIEW_TYPE } = require('./index-view');
 const { CodeLinkerSettingTab } = require('./settings-tab');
 const { initI18n, withFamily, t, plural } = require('./shared/i18n');
+const { announceStyleSettings } = require('./shared/style-settings');
 const api = require('./api');
 const indexEvents = require('./shared/index-events');
 
@@ -117,6 +118,7 @@ class CodeLinkerPlugin extends Plugin {
     this.registerDomEvent(window, 'blur', () => this.hover.hide());
     this.registerDomEvent(document, 'keyup', (evt) => { if (evt.key === 'Escape') this.hover.hide(); });
     this.addSettingTab(new CodeLinkerSettingTab(this.app, this));
+    announceStyleSettings(this);
     this.statusEl = this.addStatusBarItem();
     this.editorStatusEl = this.addStatusBarItem();
     this.editorStatusEl.addClass('mod-clickable');
