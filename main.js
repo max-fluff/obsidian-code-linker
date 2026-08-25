@@ -515,7 +515,7 @@ var require_binding = __commonJS({
       return claimed.length === 1 ? claimed[0] : null;
     }
     var bindingOwner2 = (title) => ownerOf(parseBinding2(title));
-    var ownsBinding = (title, owner) => bindingOwner2(title) === owner;
+    var ownsBinding2 = (title, owner) => bindingOwner2(title) === owner;
     var LINE_RE2 = /:(\d+)(?=\D*$)/;
     var PAGE_RE = /#page=(\d+)/i;
     var encodeValue = (v) => String(v).replace(/[%"()\s]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"));
@@ -561,7 +561,7 @@ var require_binding = __commonJS({
       const line = hits.reduce((a, n) => Math.abs(n - stored) < Math.abs(a - stored) ? n : a);
       return { state: "stale", line };
     }
-    module2.exports = { LINE_RE: LINE_RE2, PAGE_RE, ANCHORS: ANCHORS2, OWNERS, hashLine: hashLine2, parseBinding: parseBinding2, formatBinding: formatBinding2, bindStateFrom: bindStateFrom2, ownerOf, bindingOwner: bindingOwner2, ownsBinding };
+    module2.exports = { LINE_RE: LINE_RE2, PAGE_RE, ANCHORS: ANCHORS2, OWNERS, hashLine: hashLine2, parseBinding: parseBinding2, formatBinding: formatBinding2, bindStateFrom: bindStateFrom2, ownerOf, bindingOwner: bindingOwner2, ownsBinding: ownsBinding2 };
   }
 });
 
@@ -572,7 +572,7 @@ var require_root_token = __commonJS({
     var OWNER_TOKENS = { code: "code-root", reference: "ref-root" };
     var LEGACY_TOKEN = "root";
     var tokenRe = (name) => new RegExp("\\{" + name + "\\}|%7B" + name + "%7D", "gi");
-    function rootTokenIn(url) {
+    function rootTokenIn2(url) {
       const s = String(url == null ? "" : url);
       for (const owner of Object.keys(OWNER_TOKENS)) {
         if (tokenRe(OWNER_TOKENS[owner]).test(s))
@@ -581,7 +581,7 @@ var require_root_token = __commonJS({
       return tokenRe(LEGACY_TOKEN).test(s) ? "legacy" : null;
     }
     function ownsRootToken2(url, owner, claimLegacy) {
-      const found = rootTokenIn(url);
+      const found = rootTokenIn2(url);
       if (found === owner)
         return true;
       return found === "legacy" && !!claimLegacy;
@@ -599,11 +599,11 @@ var require_root_token = __commonJS({
       const s = String(url == null ? "" : url);
       if (!owner || !OWNER_TOKENS[owner])
         return s;
-      if (rootTokenIn(s) !== "legacy")
+      if (rootTokenIn2(s) !== "legacy")
         return s;
       return s.replace(tokenRe(LEGACY_TOKEN), "{" + OWNER_TOKENS[owner] + "}");
     }
-    module2.exports = { OWNER_TOKENS, LEGACY_TOKEN, rootTokenIn, ownsRootToken: ownsRootToken2, fillRoot, namespaceRoot: namespaceRoot2 };
+    module2.exports = { OWNER_TOKENS, LEGACY_TOKEN, rootTokenIn: rootTokenIn2, ownsRootToken: ownsRootToken2, fillRoot, namespaceRoot: namespaceRoot2 };
   }
 });
 
@@ -3126,29 +3126,29 @@ var require_actualize = __commonJS({
     }
     function staleLinksExtension(plugin, classes) {
       const marks = {
-        stale: Decoration.mark({ class: classes.stale }),
-        broken: Decoration.mark({ class: classes.broken })
+        "": Decoration.mark({ class: classes.link }),
+        stale: Decoration.mark({ class: classes.link + " " + classes.stale }),
+        broken: Decoration.mark({ class: classes.link + " " + classes.broken })
       };
       const build = (view) => {
         const builder = new RangeSetBuilder();
-        if (plugin.settings.markStaleLinks) {
-          const tree = syntaxTree(view.state);
-          for (const { from, to } of view.visibleRanges) {
-            const text = view.state.doc.sliceString(from, to);
-            const re = linkRegex2();
-            let m;
-            while (m = re.exec(text)) {
-              const start = from + m.index;
-              const end = start + m[0].length;
-              let inCodeNode = false;
-              tree.iterate({ from: start, to: end, enter: (n) => {
-                if (SKIP_NODE.test(n.type.name))
-                  inCodeNode = true;
-              } });
-              const state = inCodeNode ? null : plugin.linkState(m[2]);
-              if (state)
-                builder.add(start, end, marks[state]);
-            }
+        const tree = syntaxTree(view.state);
+        for (const { from, to } of view.visibleRanges) {
+          const text = view.state.doc.sliceString(from, to);
+          const re = linkRegex2();
+          let m;
+          while (m = re.exec(text)) {
+            const start = from + m.index;
+            const end = start + m[0].length;
+            let inCodeNode = false;
+            tree.iterate({ from: start, to: end, enter: (n) => {
+              if (SKIP_NODE.test(n.type.name))
+                inCodeNode = true;
+            } });
+            if (inCodeNode || !plugin.ownsLink(m[2]))
+              continue;
+            const state = plugin.settings.markStaleLinks ? plugin.linkState(m[2]) : null;
+            builder.add(start, end, marks[state || ""]);
           }
         }
         return builder.finish();
@@ -3391,7 +3391,7 @@ var require_actualize2 = __commonJS({
   "src/actualize.js"(exports2, module2) {
     "use strict";
     var { splitTarget: splitTarget2, withTitle: withTitle2, rewriteLinks, rewriteFences } = require_markdown();
-    var { LINE_RE: LINE_RE2, parseBinding: parseBinding2, ownsBinding } = require_binding();
+    var { LINE_RE: LINE_RE2, parseBinding: parseBinding2, ownsBinding: ownsBinding2 } = require_binding();
     var shared = require_actualize();
     var OWNER2 = "code";
     var { parseSpec: parseSpec2 } = require_embed();
@@ -3467,11 +3467,11 @@ var require_actualize2 = __commonJS({
       return { text: embeds.text, count: links.count + embeds.count };
     };
     var { refreshStaleLinks } = shared;
-    var staleLinksExtension = (plugin) => shared.staleLinksExtension(plugin, { stale: "code-linker-stale", broken: "code-linker-broken" });
+    var staleLinksExtension = (plugin) => shared.staleLinksExtension(plugin, { link: "code-linker-link", stale: "code-linker-stale", broken: "code-linker-broken" });
     function bindStateOf(plugin, target) {
       const { url, title } = splitTarget2(target);
       const m = url && LINE_RE2.exec(url);
-      const b = ownsBinding(title, OWNER2) ? parseBinding2(title) : null;
+      const b = ownsBinding2(title, OWNER2) ? parseBinding2(title) : null;
       return m && b ? plugin.urlBindState(url, b, parseInt(m[1], 10)) : null;
     }
     var methods = {
@@ -4587,13 +4587,77 @@ var require_style_settings = __commonJS({
   }
 });
 
+// src/shared/theme-colors.js
+var require_theme_colors = __commonJS({
+  "src/shared/theme-colors.js"(exports2, module2) {
+    "use strict";
+    var PROSE_COLORS = {
+      "link-color": "var(--link-color, var(--text-accent))",
+      "link-color-hover": "var(--link-color-hover, var(--text-accent-hover, var(--link-color, var(--text-accent))))"
+    };
+    var SIGIL_COLORS2 = {
+      "link-color": "var(--link-external-color, var(--link-color, var(--text-accent)))",
+      "stale-color": "var(--text-warning, var(--color-orange))",
+      "broken-color": "var(--text-error, var(--color-red))"
+    };
+    function capAlpha(value, max) {
+      const m = /^rgba?\(([^)]*)\)$/.exec(value);
+      if (!m)
+        return value;
+      const parts = m[1].split(",").map((s) => s.trim());
+      if (parts.length < 3)
+        return value;
+      const alpha = parts.length > 3 ? parseFloat(parts[3]) : 1;
+      if (!(alpha > max))
+        return value;
+      return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${max})`;
+    }
+    function themeColorSheet(prefix, colors, resolve) {
+      const rows = [];
+      for (const name of Object.keys(colors)) {
+        const spec = colors[name];
+        const from = typeof spec === "string" ? spec : spec.from;
+        let value = resolve(from);
+        if (value && typeof spec !== "string" && spec.maxAlpha != null)
+          value = capAlpha(value, spec.maxAlpha);
+        if (value)
+          rows.push(`--${prefix}-${name}: ${value};`);
+      }
+      return rows.length ? `body { ${rows.join(" ")} }` : "";
+    }
+    function trackThemeColors2(plugin, prefix, colors) {
+      if (typeof document === "undefined" || !document.head || !document.body)
+        return;
+      const sheet = document.createElement("style");
+      document.head.appendChild(sheet);
+      plugin.register(() => sheet.remove());
+      const paint = () => {
+        const probe = document.createElement("span");
+        probe.style.position = "absolute";
+        probe.style.visibility = "hidden";
+        document.body.appendChild(probe);
+        const resolve = (expr) => {
+          probe.style.color = "";
+          probe.style.color = expr;
+          return getComputedStyle(probe).color;
+        };
+        sheet.textContent = themeColorSheet(prefix, colors, resolve);
+        probe.remove();
+      };
+      plugin.app.workspace.onLayoutReady(paint);
+      plugin.registerEvent(plugin.app.workspace.on("css-change", paint));
+    }
+    module2.exports = { trackThemeColors: trackThemeColors2, themeColorSheet, capAlpha, PROSE_COLORS, SIGIL_COLORS: SIGIL_COLORS2 };
+  }
+});
+
 // src/api.js
 var require_api = __commonJS({
   "src/api.js"(exports2, module2) {
     "use strict";
     var { LINKER_API } = require_discover();
     var { splitTarget: splitTarget2 } = require_markdown();
-    var { bindingOwner: bindingOwner2, ownsBinding } = require_binding();
+    var { bindingOwner: bindingOwner2, ownsBinding: ownsBinding2 } = require_binding();
     var OWNER2 = "code";
     var pick = (e) => ({ name: e.name, kind: e.kind, lang: e.lang, path: e.path, line: e.line });
     module2.exports = {
@@ -4630,7 +4694,7 @@ var require_api = __commonJS({
             claim: (target, title) => {
               const split = splitTarget2(String(target || ""));
               const ttl = title ? String(title) : split.title;
-              if (ownsBinding(ttl, OWNER2))
+              if (ownsBinding2(ttl, OWNER2))
                 return "binding";
               if (bindingOwner2(ttl))
                 return null;
@@ -5076,8 +5140,8 @@ var { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEMPL
 var { compileGitignore, isIgnored } = require_gitignore();
 var { watchTree } = require_fs_watch();
 var { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require_markdown();
-var { LINE_RE, ANCHORS, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require_binding();
-var { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require_root_token();
+var { LINE_RE, ANCHORS, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner, ownsBinding } = require_binding();
+var { fillRoot: fillRootToken, ownsRootToken, rootTokenIn, namespaceRoot } = require_root_token();
 var { menuSection } = require_menu();
 var { buildMenu } = require_menu_verbs();
 var { registerActions, menuActions } = require_actions();
@@ -5102,6 +5166,7 @@ var { CodeIndexView, INDEX_VIEW_TYPE } = require_index_view();
 var { CodeLinkerSettingTab } = require_settings_tab();
 var { initI18n, withFamily, t, plural } = require_i18n();
 var { announceStyleSettings } = require_style_settings();
+var { trackThemeColors, SIGIL_COLORS } = require_theme_colors();
 var api = require_api();
 var indexEvents = require_index_events();
 var CodeLinkerPlugin = class extends Plugin {
@@ -5154,6 +5219,11 @@ var CodeLinkerPlugin = class extends Plugin {
     });
     this.addSettingTab(new CodeLinkerSettingTab(this.app, this));
     announceStyleSettings(this);
+    trackThemeColors(this, "code-linker", Object.assign({
+      // The band is drawn behind the snippet, so the theme's selection colour is taken down
+      // to where the code on top of it stays readable.
+      "highlight-color": { from: "var(--text-selection, var(--text-highlight-bg))", maxAlpha: 0.35 }
+    }, SIGIL_COLORS));
     this.statusEl = this.addStatusBarItem();
     this.editorStatusEl = this.addStatusBarItem();
     this.editorStatusEl.addClass("mod-clickable");
@@ -5251,18 +5321,37 @@ var CodeLinkerPlugin = class extends Plugin {
       return true;
     return !!this.targetIndexedFile(this.decodeTarget(url));
   }
+  // Whether a raw link target is one of ours. linkState() can't answer this — it returns
+  // null both for another plugin's link and for ours with no line to judge. A binding of ours
+  // settles it on its own, which is what a link written against a template without the root
+  // token has to go on. The legacy verdict is asked for last, since it can reach the index and
+  // every ordinary link in the note goes past here.
+  ownsLink(target) {
+    const { url, title } = splitTarget(target);
+    if (ownsBinding(title, OWNER))
+      return true;
+    const owner = rootTokenIn(url);
+    if (owner === OWNER)
+      return true;
+    return owner === "legacy" && this.legacyRootIsOurs(url, title);
+  }
   resolveRootLinks(el) {
     const links = el.querySelectorAll ? el.querySelectorAll("a") : [];
     for (const a of links) {
       const title = a.getAttribute("title") || "";
+      let ours = false;
       for (const attr of ["href", "data-href"]) {
         const v = a.getAttribute(attr);
         if (!v)
           continue;
         const out = this.fillRoot(v, this.legacyRootIsOurs(v, title));
-        if (out !== v)
+        if (out !== v) {
           a.setAttribute(attr, out);
+          ours = true;
+        }
       }
+      if (ours || ownsBinding(title, OWNER))
+        a.classList.add("code-linker-link");
     }
     this.markStaleAnchors(el);
   }

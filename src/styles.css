@@ -3,61 +3,7 @@
 name: Code Linker
 id: %p%
 settings:
-  -
-    id: %p%-highlight-color
-    title: Preview line highlight
-    description: Background of the target line in hover previews and embeds. Default follows the theme's selection colour.
-    type: variable-themed-color
-    format: hex
-    opacity: true
-    default-light: '#c8dcff80'
-    default-dark: '#3a4a6b80'
-  -
-    id: %p%-stale-color
-    title: Stale-link underline colour
-    description: Pinned links and embeds whose code has moved — the update commands can fix them. Default follows the theme's warning colour.
-    type: variable-themed-color
-    format: hex
-    opacity: false
-    default-light: '#c1810b'
-    default-dark: '#e0a526'
-  -
-    id: %p%-broken-color
-    title: Broken-link underline colour
-    description: Pinned links and embeds whose pin no longer matches anything — renamed, removed, or the line rewritten. Default follows the theme's error colour.
-    type: variable-themed-color
-    format: hex
-    opacity: false
-    default-light: '#c4302b'
-    default-dark: '#e35555'
-  -
-    id: %p%-mark-underline-style
-    title: Stale / broken underline style
-    type: variable-select
-    default: dotted
-    options:
-      - dotted
-      - dashed
-      - solid
-      - double
-  -
-    id: %p%-snippet-line-height
-    title: Snippet line height
-    description: How tightly the lines of a preview or an embed are set. The target line's highlight follows it.
-    type: variable-number-slider
-    default: 1.5
-    min: 1
-    max: 2.5
-    step: 0.05
-  -
-    id: %p%-embed-height
-    title: Inline embed height
-    description: How tall an inline embed grows before it scrolls, in percent of the window.
-    type: variable-number-slider
-    default: 60
-    min: 20
-    max: 100
-    step: 5
+%rows:sigil%
   -
     id: %p%-hover-height
     title: Hover preview height
@@ -68,16 +14,40 @@ settings:
     max: 100
     step: 5
   -
-    id: %p%-embed-tools-idle
-    title: Inline embed toolbar when idle
-    description: How visible the embed's toolbar is while the pointer is elsewhere. 0 keeps it out of the way until you hover the embed or focus it.
+    id: %p%-highlight-color
+    title: Preview line highlight
+    description: Background of the target line in hover previews and embeds. Follows the theme's selection colour until you pick one.
+    type: variable-color
+    format: hex
+    opacity: true
+  -
+    id: %p%-snippet-line-height
+    title: Snippet line height
+    description: How tightly the lines of a preview or an embed are set. The target line's highlight follows it.
+    type: variable-number-slider
+    default: 1.5
+    min: 1
+    max: 2.5
+    step: 0.05
+  -
+    id: %p%-snippet-font-size
+    title: Snippet text size
+    description: Size of the code in a preview or an embed, relative to the interface text.
     type: variable-number-slider
     default: 1
-    min: 0
-    max: 1
-    step: 0.25
+    min: 0.7
+    max: 1.4
+    step: 0.05
+%rows:pickers%
+%rows:panels%
 
 */
+
+/* Declared so Style Settings' picker can show the colour actually in use — see the note in
+   the shared sigil.css. */
+body {
+  --%p%-highlight-color: var(--text-selection);
+}
 
 /* Snippet chrome shared by the hover popover and the inline embed. Both containers carry
    .%p%-code (see the token colours below). The popover is a fixed overlay; the
@@ -112,7 +82,7 @@ settings:
   overflow: auto;
   padding: 0;
   font-family: var(--font-monospace);
-  font-size: var(--font-ui-smaller);
+  font-size: calc(var(--font-ui-smaller) * var(--%p%-snippet-font-size, 1));
   --cl-lh: calc(var(--%p%-snippet-line-height, 1.5) * 1em);
 }
 
@@ -187,7 +157,7 @@ settings:
 }
 
 .%p%-embed-numbers > .%p%-embed-marked {
-  background: var(--%p%-highlight-color, var(--text-selection));
+  background: var(--%p%-highlight-color);
 }
 
 .%p%-code .%p%-embed-code pre {
@@ -229,7 +199,7 @@ settings:
   right: 0;
   top: 0;
   /* actual row offset (row-index * line-height) is set inline */ height: var(--cl-lh);
-  background: var(--%p%-highlight-color, var(--text-selection));
+  background: var(--%p%-highlight-color);
   z-index: 0;
   pointer-events: none;
 }
@@ -297,11 +267,11 @@ settings:
    is tinted and a note under the snippet explains. Same colours as the link marks, but
    their own classes — an embed is a block, and the links' underline doesn't suit it. */
 .%p%-embed-stale {
-  color: var(--%p%-stale-color, var(--text-warning));
+  color: var(--%p%-stale-color);
 }
 
 .%p%-embed-broken {
-  color: var(--%p%-broken-color, var(--text-error));
+  color: var(--%p%-broken-color);
 }
 
 /* Update preview: each note is a checkable group, its link changes a compact table, and
@@ -314,6 +284,20 @@ settings:
 }
 
 /* --- index panel ------------------------------------------------------- */
+
+.%p%-index {
+  font-size: var(--%p%-panel-font-size, var(--font-ui-small));
+}
+
+body.%p%-dense .%p%-index-row {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+body.%p%-roomy .%p%-index-row {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
 
 .%p%-index-bar {
   display: flex;

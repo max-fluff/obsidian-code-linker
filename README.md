@@ -325,7 +325,25 @@ With **Respect .gitignore** on, a `.gitignore` prunes the scan too: files are re
 
 ### Styling
 
-Everything the plugin draws around a snippet is exposed to the [Style Settings](https://github.com/mgmeyers/obsidian-style-settings) plugin under a *Code Linker* section: the preview/embed line highlight, the stale/broken underlines (colour and underline style), how tightly the snippet's lines are set, how tall an embed and a hover preview grow before they scroll, and how visible an embed's toolbar is when the pointer is elsewhere. Without Style Settings, or left at default, they follow your theme's colours. Every value is a CSS variable, so a snippet does just as well: `--code-linker-highlight-color`, `--code-linker-stale-color`, `--code-linker-broken-color`, `--code-linker-mark-underline-style`, `--code-linker-snippet-line-height`, `--code-linker-embed-height`, `--code-linker-hover-height`, `--code-linker-embed-tools-idle`. The target line's highlight is placed by the line height, so the two can't drift apart.
+Everything the plugin draws is exposed to the [Style Settings](https://github.com/mgmeyers/obsidian-style-settings) plugin under a *Code Linker* section. Without Style Settings, or left at default, it follows your theme's colours.
+
+| Section | What you can set |
+|---|---|
+| **Links** | colour and underline for the links the plugin inserts — both follow your theme's own until you change them |
+| **Stale and broken links** | the two underline colours, their style and thickness, and an optional symbol beside the link for themes where a thin underline is hard to see |
+| **Previews and embeds** | how tall and wide a hover preview grows, how tall an embed grows, how visible its toolbar is when idle, the target line's highlight, and the snippet's line height and text size |
+| **Autocomplete**, **Side panel** | hide the path column in suggestions; row density and text size in the index panel |
+
+Every colour picker opens on the colour actually in use and follows your theme until you pick one; every option is a plain CSS variable or a class on `body`, so a snippet in `.obsidian/snippets/` does just as well:
+
+- **Links** — `--code-linker-link-color`, `--code-linker-underline`
+- **Stale and broken** — `--code-linker-stale-color`, `--code-linker-broken-color`, `--code-linker-mark-underline-style`, `--code-linker-mark-underline-width`, `--code-linker-stale-symbol`, `--code-linker-broken-symbol`; `body.code-linker-mark-after`
+- **Previews and embeds** — `--code-linker-hover-height`, `--code-linker-hover-width`, `--code-linker-embed-height`, `--code-linker-embed-tools-idle`, `--code-linker-highlight-color`, `--code-linker-snippet-line-height`, `--code-linker-snippet-font-size`
+- **Autocomplete and panel** — `--code-linker-panel-font-size`; `body.code-linker-hide-suggestion-path`, `body.code-linker-dense`, `body.code-linker-roomy`
+
+A stale or broken link can also say so in words: type a character or an emoji into *Stale-link symbol* or *Broken-link symbol*, shown before the link unless you turn on *Put the symbol after the link*.
+
+The target line's highlight is placed by the snippet's line height, so the two can't drift apart. It follows your theme's selection colour, taken down to where the code drawn on top of it stays readable; *Preview line highlight* sets it outright, at whatever strength you choose. Set `--code-linker-embed-tools-idle` to `0` and an embed's toolbar stays out of the way until you hover it.
 
 ## Link targets and URI templates
 

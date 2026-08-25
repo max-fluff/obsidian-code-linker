@@ -88,7 +88,7 @@ const pinLinksInText = (anchors) => (plugin, text) => {
 };
 
 const { refreshStaleLinks } = shared;
-const staleLinksExtension = (plugin) => shared.staleLinksExtension(plugin, { stale: 'code-linker-stale', broken: 'code-linker-broken' });
+const staleLinksExtension = (plugin) => shared.staleLinksExtension(plugin, { link: 'code-linker-link', stale: 'code-linker-stale', broken: 'code-linker-broken' });
 
 // What a link's binding says about where it points, or null when there's nothing to
 // judge: no line, or no binding of ours to judge it against.

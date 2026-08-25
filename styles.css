@@ -3,6 +3,12 @@
 /* Styles every linker plugin uses. The token below stands for the plugin class prefix;
    build.mjs substitutes it when it assembles styles.css. See CONTRIBUTING.md. */
 
+/* The second column of a suggestion row — the note in one pair, the path in the other. */
+body.code-linker-hide-suggestion-path .code-linker-path,
+body.code-linker-hide-suggestion-path .code-linker-suggestion-note {
+  display: none;
+}
+
 .code-linker-preview-table {
   width: 100%;
   border-collapse: collapse;
@@ -168,7 +174,7 @@
 .code-linker-hover {
   position: fixed;
   z-index: var(--layer-popover);
-  max-width: min(720px, 90vw);
+  max-width: min(var(--code-linker-hover-width, 720px), 90vw);
   box-shadow: var(--shadow-s);
   user-select: text;
   -webkit-user-select: text;
@@ -268,21 +274,83 @@
   color: var(--text-error);
 }
 
+/* Colours are declared, not merely read with a fallback. Style Settings shows a colour row's
+   live computed value when the row carries no default, and an undeclared variable reads as
+   empty and renders a blank swatch. Its own rule is `body.css-settings-manager`, so a colour
+   chosen there still outranks this. See CONTRIBUTING.md. */
+body {
+  --code-linker-link-color: var(--link-external-color, var(--link-color));
+  --code-linker-stale-color: var(--text-warning);
+  --code-linker-broken-color: var(--text-error);
+}
+
+/* Our own links, marked in both render modes whether or not they have drifted. The defaults
+   are the theme's own, so a link the plugin inserted goes on looking like any other link
+   until a value is chosen.
+   What it looks like is decided in --sl-* below, where no theme competes; only the rule that
+   spends them meets the theme's own link rules. See CONTRIBUTING.md. */
+.code-linker-link,
+.cm-code-linker-link {
+  --sl-ink: var(--code-linker-link-color);
+  --sl-decoration: var(--code-linker-underline, var(--link-external-decoration, underline));
+}
+
+/* An editor line carries no underline of its own, so nothing chosen means nothing drawn. */
+.cm-code-linker-link {
+  --sl-decoration: var(--code-linker-underline, none);
+}
+
+/* The one rule that meets the theme's own, and it sits no higher than the plugin's rules ever
+   have: a theme that paints its own links still wins, as it did before any of this was
+   configurable. */
+.code-linker-link,
+.cm-code-linker-link {
+  color: var(--sl-ink);
+  text-decoration: var(--sl-decoration);
+}
+
 /* Drifted line (stale) and renamed/removed symbol (broken), in both render modes.
    A border-bottom rather than text-decoration: wavy/offset underlines render
-   inconsistently across platforms, so a plain border is the reliable choice. */
+   inconsistently across platforms, so a plain border is the reliable choice — and it stacks
+   with the link's own underline above instead of fighting it. */
 .code-linker-stale,
 .code-linker-broken {
-  border-bottom-width: 1px;
+  border-bottom-width: var(--code-linker-mark-underline-width, 1px);
   border-bottom-style: var(--code-linker-mark-underline-style, dotted);
 }
 
 .code-linker-stale {
-  border-bottom-color: var(--code-linker-stale-color, var(--text-warning));
+  border-bottom-color: var(--code-linker-stale-color);
 }
 
 .code-linker-broken {
-  border-bottom-color: var(--code-linker-broken-color, var(--text-error));
+  border-bottom-color: var(--code-linker-broken-color);
+}
+
+/* The same underline is invisible in some themes, so the state can also be spelled out.
+   `none` rather than an empty string: with no symbol chosen there is no pseudo-element at
+   all. The symbol is not part of the link text, so it carries none of its underline. */
+.code-linker-stale::before,
+body.code-linker-mark-after .code-linker-stale::after {
+  content: var(--code-linker-stale-symbol, none);
+  color: var(--code-linker-stale-color);
+  border-bottom: none;
+  font-size: 0.8em;
+  vertical-align: super;
+}
+
+.code-linker-broken::before,
+body.code-linker-mark-after .code-linker-broken::after {
+  content: var(--code-linker-broken-symbol, none);
+  color: var(--code-linker-broken-color);
+  border-bottom: none;
+  font-size: 0.8em;
+  vertical-align: super;
+}
+
+body.code-linker-mark-after .code-linker-stale::before,
+body.code-linker-mark-after .code-linker-broken::before {
+  content: none;
 }
 
 /* Nested sub-rows — searchable kinds under a language, and chosen folders under a
@@ -341,7 +409,7 @@
 /* A guessed move (file matched by symbol or basename), not a plain line drift — tinted so
    it stands out for a closer look before applying. */
 .code-linker-preview-moved .code-linker-preview-move {
-  color: var(--code-linker-stale-color, var(--text-warning));
+  color: var(--code-linker-stale-color);
   white-space: normal;
 }
 
@@ -352,12 +420,12 @@
 }
 
 .code-linker-preview-attention {
-  color: var(--code-linker-broken-color, var(--text-error));
+  color: var(--code-linker-broken-color);
 }
 
 .code-linker-preview-broken {
   font-size: var(--font-ui-small);
-  color: var(--code-linker-broken-color, var(--text-error));
+  color: var(--code-linker-broken-color);
   padding: 2px 8px;
   overflow-wrap: anywhere;
 }
@@ -368,32 +436,61 @@ name: Code Linker
 id: code-linker
 settings:
   -
-    id: code-linker-highlight-color
-    title: Preview line highlight
-    description: Background of the target line in hover previews and embeds. Default follows the theme's selection colour.
-    type: variable-themed-color
+    id: code-linker-links
+    title: Links
+    type: heading
+    level: 1
+  -
+    id: code-linker-link-color
+    title: Link colour
+    description: Follows the theme's colour for external links until you pick one.
+    type: variable-color
     format: hex
-    opacity: true
-    default-light: '#c8dcff80'
-    default-dark: '#3a4a6b80'
+    opacity: false
+  -
+    id: code-linker-underline
+    title: Underline
+    description: How a link the plugin inserted is underlined in Reading view.
+    type: variable-select
+    default: var(--link-external-decoration, underline)
+    options:
+      -
+        label: Theme default
+        value: var(--link-external-decoration, underline)
+      -
+        label: Underline
+        value: underline
+      -
+        label: Dotted
+        value: underline dotted
+      -
+        label: Dashed
+        value: underline dashed
+      -
+        label: Double
+        value: underline double
+      -
+        label: None
+        value: none
+  -
+    id: code-linker-marks
+    title: Stale and broken links
+    type: heading
+    level: 1
   -
     id: code-linker-stale-color
     title: Stale-link underline colour
-    description: Pinned links and embeds whose code has moved — the update commands can fix them. Default follows the theme's warning colour.
-    type: variable-themed-color
+    description: Links and embeds whose target has moved — the update commands can fix them. Follows the theme's warning colour until you pick one.
+    type: variable-color
     format: hex
     opacity: false
-    default-light: '#c1810b'
-    default-dark: '#e0a526'
   -
     id: code-linker-broken-color
     title: Broken-link underline colour
-    description: Pinned links and embeds whose pin no longer matches anything — renamed, removed, or the line rewritten. Default follows the theme's error colour.
-    type: variable-themed-color
+    description: Links and embeds whose pin no longer matches anything — renamed, removed, or rewritten. Follows the theme's error colour until you pick one.
+    type: variable-color
     format: hex
     opacity: false
-    default-light: '#c4302b'
-    default-dark: '#e35555'
   -
     id: code-linker-mark-underline-style
     title: Stale / broken underline style
@@ -405,29 +502,45 @@ settings:
       - solid
       - double
   -
-    id: code-linker-snippet-line-height
-    title: Snippet line height
-    description: How tightly the lines of a preview or an embed are set. The target line's highlight follows it.
+    id: code-linker-mark-underline-width
+    title: Stale / broken underline thickness
     type: variable-number-slider
-    default: 1.5
+    default: 1
     min: 1
-    max: 2.5
-    step: 0.05
+    max: 4
+    step: 1
+    format: px
+  -
+    id: code-linker-stale-symbol
+    title: Stale-link symbol
+    description: Any character or emoji, shown beside a link whose target has moved. Leave empty for none.
+    type: variable-text
+    quotes: true
+    default: ''
+  -
+    id: code-linker-broken-symbol
+    title: Broken-link symbol
+    description: Any character or emoji, shown beside a link whose pin no longer matches. Leave empty for none.
+    type: variable-text
+    quotes: true
+    default: ''
+  -
+    id: code-linker-mark-after
+    title: Put the symbol after the link
+    description: Off shows it before the link.
+    type: class-toggle
+    default: false
+  -
+    id: code-linker-previews
+    title: Previews and embeds
+    type: heading
+    level: 1
   -
     id: code-linker-embed-height
     title: Inline embed height
     description: How tall an inline embed grows before it scrolls, in percent of the window.
     type: variable-number-slider
     default: 60
-    min: 20
-    max: 100
-    step: 5
-  -
-    id: code-linker-hover-height
-    title: Hover preview height
-    description: How tall a hover preview grows before it scrolls, in percent of the window.
-    type: variable-number-slider
-    default: 40
     min: 20
     max: 100
     step: 5
@@ -440,8 +553,97 @@ settings:
     min: 0
     max: 1
     step: 0.25
+  -
+    id: code-linker-hover-width
+    title: Hover preview width
+    description: How wide a hover preview grows, capped at 90% of the window.
+    type: variable-number-slider
+    default: 720
+    min: 320
+    max: 1200
+    step: 20
+    format: px
+  -
+    id: code-linker-hover-height
+    title: Hover preview height
+    description: How tall a hover preview grows before it scrolls, in percent of the window.
+    type: variable-number-slider
+    default: 40
+    min: 20
+    max: 100
+    step: 5
+  -
+    id: code-linker-highlight-color
+    title: Preview line highlight
+    description: Background of the target line in hover previews and embeds. Follows the theme's selection colour until you pick one.
+    type: variable-color
+    format: hex
+    opacity: true
+  -
+    id: code-linker-snippet-line-height
+    title: Snippet line height
+    description: How tightly the lines of a preview or an embed are set. The target line's highlight follows it.
+    type: variable-number-slider
+    default: 1.5
+    min: 1
+    max: 2.5
+    step: 0.05
+  -
+    id: code-linker-snippet-font-size
+    title: Snippet text size
+    description: Size of the code in a preview or an embed, relative to the interface text.
+    type: variable-number-slider
+    default: 1
+    min: 0.7
+    max: 1.4
+    step: 0.05
+  -
+    id: code-linker-autocomplete
+    title: Autocomplete
+    type: heading
+    level: 1
+  -
+    id: code-linker-hide-suggestion-path
+    title: Hide the second column
+    description: Drop the note or path shown beside a suggestion, leaving the name alone.
+    type: class-toggle
+    default: false
+  -
+    id: code-linker-side-panel
+    title: Side panel
+    type: heading
+    level: 1
+  -
+    id: code-linker-panel-density
+    title: Row density
+    description: How tightly the panel's rows are set. Leave empty for the normal spacing.
+    type: class-select
+    allowEmpty: true
+    options:
+      -
+        label: Dense
+        value: code-linker-dense
+      -
+        label: Roomy
+        value: code-linker-roomy
+  -
+    id: code-linker-panel-font-size
+    title: Text size
+    description: Base size for the panel's rows. Labels that are deliberately secondary keep their own smaller size.
+    type: variable-select
+    default: var(--font-ui-small)
+    options:
+      - var(--font-ui-smaller)
+      - var(--font-ui-small)
+      - var(--font-ui-medium)
 
 */
+
+/* Declared so Style Settings' picker can show the colour actually in use — see the note in
+   the shared sigil.css. */
+body {
+  --code-linker-highlight-color: var(--text-selection);
+}
 
 /* Snippet chrome shared by the hover popover and the inline embed. Both containers carry
    .code-linker-code (see the token colours below). The popover is a fixed overlay; the
@@ -476,7 +678,7 @@ settings:
   overflow: auto;
   padding: 0;
   font-family: var(--font-monospace);
-  font-size: var(--font-ui-smaller);
+  font-size: calc(var(--font-ui-smaller) * var(--code-linker-snippet-font-size, 1));
   --cl-lh: calc(var(--code-linker-snippet-line-height, 1.5) * 1em);
 }
 
@@ -551,7 +753,7 @@ settings:
 }
 
 .code-linker-embed-numbers > .code-linker-embed-marked {
-  background: var(--code-linker-highlight-color, var(--text-selection));
+  background: var(--code-linker-highlight-color);
 }
 
 .code-linker-code .code-linker-embed-code pre {
@@ -593,7 +795,7 @@ settings:
   right: 0;
   top: 0;
   /* actual row offset (row-index * line-height) is set inline */ height: var(--cl-lh);
-  background: var(--code-linker-highlight-color, var(--text-selection));
+  background: var(--code-linker-highlight-color);
   z-index: 0;
   pointer-events: none;
 }
@@ -661,11 +863,11 @@ settings:
    is tinted and a note under the snippet explains. Same colours as the link marks, but
    their own classes — an embed is a block, and the links' underline doesn't suit it. */
 .code-linker-embed-stale {
-  color: var(--code-linker-stale-color, var(--text-warning));
+  color: var(--code-linker-stale-color);
 }
 
 .code-linker-embed-broken {
-  color: var(--code-linker-broken-color, var(--text-error));
+  color: var(--code-linker-broken-color);
 }
 
 /* Update preview: each note is a checkable group, its link changes a compact table, and
@@ -678,6 +880,20 @@ settings:
 }
 
 /* --- index panel ------------------------------------------------------- */
+
+.code-linker-index {
+  font-size: var(--code-linker-panel-font-size, var(--font-ui-small));
+}
+
+body.code-linker-dense .code-linker-index-row {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+body.code-linker-roomy .code-linker-index-row {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
 
 .code-linker-index-bar {
   display: flex;

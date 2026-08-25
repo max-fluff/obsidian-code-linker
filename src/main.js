@@ -19,8 +19,8 @@ const { PRESETS, PRISM_LANG, JETBRAINS_PRODUCTS, DEFAULT_SETTINGS, LANGUAGES_TEM
 const { compileGitignore, isIgnored } = require('./gitignore');
 const { watchTree } = require('./shared/fs-watch');
 const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
-const { LINE_RE, ANCHORS, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner } = require('./shared/binding');
-const { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require('./shared/root-token');
+const { LINE_RE, ANCHORS, hashLine, parseBinding, formatBinding, bindStateFrom, bindingOwner, ownsBinding } = require('./shared/binding');
+const { fillRoot: fillRootToken, ownsRootToken, rootTokenIn, namespaceRoot } = require('./shared/root-token');
 const { menuSection } = require('./shared/menu');
 const { buildMenu } = require('./shared/menu-verbs');
 const { registerActions, menuActions } = require('./shared/actions');
@@ -57,6 +57,7 @@ const { CodeIndexView, INDEX_VIEW_TYPE } = require('./index-view');
 const { CodeLinkerSettingTab } = require('./settings-tab');
 const { initI18n, withFamily, t, plural } = require('./shared/i18n');
 const { announceStyleSettings } = require('./shared/style-settings');
+const { trackThemeColors, SIGIL_COLORS } = require('./shared/theme-colors');
 const api = require('./api');
 const indexEvents = require('./shared/index-events');
 
@@ -119,6 +120,11 @@ class CodeLinkerPlugin extends Plugin {
     this.registerDomEvent(document, 'keyup', (evt) => { if (evt.key === 'Escape') this.hover.hide(); });
     this.addSettingTab(new CodeLinkerSettingTab(this.app, this));
     announceStyleSettings(this);
+    trackThemeColors(this, 'code-linker', Object.assign({
+      // The band is drawn behind the snippet, so the theme's selection colour is taken down
+      // to where the code on top of it stays readable.
+      'highlight-color': { from: 'var(--text-selection, var(--text-highlight-bg))', maxAlpha: 0.35 },
+    }, SIGIL_COLORS));
     this.statusEl = this.addStatusBarItem();
     this.editorStatusEl = this.addStatusBarItem();
     this.editorStatusEl.addClass('mod-clickable');
@@ -249,16 +255,34 @@ class CodeLinkerPlugin extends Plugin {
     return !!this.targetIndexedFile(this.decodeTarget(url));
   }
 
+  // Whether a raw link target is one of ours. linkState() can't answer this — it returns
+  // null both for another plugin's link and for ours with no line to judge. A binding of ours
+  // settles it on its own, which is what a link written against a template without the root
+  // token has to go on. The legacy verdict is asked for last, since it can reach the index and
+  // every ordinary link in the note goes past here.
+  ownsLink(target) {
+    const { url, title } = splitTarget(target);
+    if (ownsBinding(title, OWNER)) return true;
+    const owner = rootTokenIn(url);
+    if (owner === OWNER) return true;
+    return owner === 'legacy' && this.legacyRootIsOurs(url, title);
+  }
+
   resolveRootLinks(el) {
     const links = el.querySelectorAll ? el.querySelectorAll('a') : [];
     for (const a of links) {
       const title = a.getAttribute('title') || '';
+      let ours = false;
       for (const attr of ['href', 'data-href']) {
         const v = a.getAttribute(attr);
         if (!v) continue;
         const out = this.fillRoot(v, this.legacyRootIsOurs(v, title));
-        if (out !== v) a.setAttribute(attr, out);
+        if (out !== v) { a.setAttribute(attr, out); ours = true; }
       }
+      // Filling the token is the one moment the anchor is known to be ours: afterwards the
+      // href is an ordinary path and nothing tells it from anyone else's. A binding of ours
+      // says so too, and outlives the substitution.
+      if (ours || ownsBinding(title, OWNER)) a.classList.add('code-linker-link');
     }
     this.markStaleAnchors(el);
   }
