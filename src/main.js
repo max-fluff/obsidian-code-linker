@@ -57,7 +57,7 @@ const { CodeIndexView, INDEX_VIEW_TYPE } = require('./index-view');
 const { CodeLinkerSettingTab } = require('./settings-tab');
 const { initI18n, withFamily, t, plural } = require('./shared/i18n');
 const { announceStyleSettings } = require('./shared/style-settings');
-const { trackThemeColors, SIGIL_COLORS } = require('./shared/theme-colors');
+const { trackThemeColors, SIGIL_COLORS, SIGIL_PICKS } = require('./shared/theme-colors');
 const api = require('./api');
 const indexEvents = require('./shared/index-events');
 
@@ -124,7 +124,7 @@ class CodeLinkerPlugin extends Plugin {
       // The band is drawn behind the snippet, so the theme's selection colour is taken down
       // to where the code on top of it stays readable.
       'highlight-color': { from: 'var(--text-selection, var(--text-highlight-bg))', maxAlpha: 0.35 },
-    }, SIGIL_COLORS));
+    }, SIGIL_COLORS), SIGIL_PICKS);
     this.statusEl = this.addStatusBarItem();
     this.editorStatusEl = this.addStatusBarItem();
     this.editorStatusEl.addClass('mod-clickable');

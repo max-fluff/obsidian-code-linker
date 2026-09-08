@@ -329,17 +329,19 @@ Everything the plugin draws is exposed to the [Style Settings](https://github.co
 
 | Section | What you can set |
 |---|---|
-| **Links** | colour and underline for the links the plugin inserts — both follow your theme's own until you change them |
+| **Links** | colour and underline for the links the plugin inserts — both follow your theme's own until you change them — and *Follow the link colour*, a hue of your own kept in step with the colour your theme gives links there |
 | **Stale and broken links** | the two underline colours, their style and thickness, and an optional symbol beside the link for themes where a thin underline is hard to see |
 | **Previews and embeds** | how tall and wide a hover preview grows, how tall an embed grows, how visible its toolbar is when idle, the target line's highlight, and the snippet's line height and text size |
 | **Autocomplete**, **Side panel** | hide the path column in suggestions; row density and text size in the index panel |
 
 Every colour picker opens on the colour actually in use and follows your theme until you pick one; every option is a plain CSS variable or a class on `body`, so a snippet in `.obsidian/snippets/` does just as well:
 
-- **Links** — `--code-linker-link-color`, `--code-linker-underline`
+- **Links** — `--code-linker-link-color`, `--code-linker-hue-shift`, `--code-linker-hue`, `--code-linker-underline`; `body.code-linker-hue-turned`, `body.code-linker-hue-fixed`
 - **Stale and broken** — `--code-linker-stale-color`, `--code-linker-broken-color`, `--code-linker-mark-underline-style`, `--code-linker-mark-underline-width`, `--code-linker-stale-symbol`, `--code-linker-broken-symbol`; `body.code-linker-mark-after`
 - **Previews and embeds** — `--code-linker-hover-height`, `--code-linker-hover-width`, `--code-linker-embed-height`, `--code-linker-embed-tools-idle`, `--code-linker-highlight-color`, `--code-linker-snippet-line-height`, `--code-linker-snippet-font-size`
 - **Autocomplete and panel** — `--code-linker-panel-font-size`; `body.code-linker-hide-suggestion-path`, `body.code-linker-dense`, `body.code-linker-roomy`
+
+*Follow the link colour* derives such a link from the link colour of the note it sits in — the one your theme paints there, including a colour a `cssclass` gives a single note — and either turns its hue by *Hue shift* or replaces it with *Hue*. Lightness and saturation stay the theme's, so the link keeps its relationship to your other links when the theme, the accent colour or the note changes. It needs an Obsidian installer new enough for relative colours; without them the colour above is used.
 
 A stale or broken link can also say so in words: type a character or an emoji into *Stale-link symbol* or *Broken-link symbol*, shown before the link unless you turn on *Put the symbol after the link*.
 
