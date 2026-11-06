@@ -1,4 +1,4 @@
-/* Code Linker 1.8.0 — bundled from src/ by esbuild. Do not edit directly; edit src/ and run "npm run build". */
+/* Code Linker 1.8.1 — bundled from src/ by esbuild. Do not edit directly; edit src/ and run "npm run build". */
 "use strict";
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
