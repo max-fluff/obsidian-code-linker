@@ -7,7 +7,7 @@ settings:
   -
     id: %p%-hover-height
     title: Hover preview height
-    description: How tall a hover preview grows before it scrolls, in percent of the window.
+    description: Maximum height of a hover preview, in percent of the window.
     type: variable-number-slider
     default: 40
     min: 20
@@ -16,14 +16,14 @@ settings:
   -
     id: %p%-highlight-color
     title: Preview line highlight
-    description: Background of the target line in hover previews and embeds. Follows the theme's selection colour until you pick one.
+    description: Background of the target line in previews and embeds. Theme selection colour until you pick one.
     type: variable-color
     format: hex
     opacity: true
   -
     id: %p%-snippet-line-height
     title: Snippet line height
-    description: How tightly the lines of a preview or an embed are set. The target line's highlight follows it.
+    description: Line spacing in previews and embeds.
     type: variable-number-slider
     default: 1.5
     min: 1
@@ -32,7 +32,7 @@ settings:
   -
     id: %p%-snippet-font-size
     title: Snippet text size
-    description: Size of the code in a preview or an embed, relative to the interface text.
+    description: Code size in previews and embeds, relative to the interface text.
     type: variable-number-slider
     default: 1
     min: 0.7
