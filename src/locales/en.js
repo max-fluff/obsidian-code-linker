@@ -97,6 +97,7 @@ module.exports = {
   'embed.notFound': 'Code Linker: no code entry matches “{query}”',
   'embed.ambiguous': 'Code Linker: {n} entries match “{query}” — add a language/kind filter (e.g. py:) or a path to pick one',
   'embed.unreadable': 'Code Linker: can’t read {path}',
+  'embed.outsideRoot': 'Code Linker: {path} is outside the code root — an embed only reads files under it',
   'plural.embedMore': { one: 'Show 1 more line', other: 'Show {n} more lines' },
   'embed.tool.wrap': 'Wrap long lines',
   'embed.tool.copy': 'Copy snippet',

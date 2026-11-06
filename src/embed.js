@@ -62,8 +62,9 @@ function resolvePath(plugin, relPath) {
 }
 
 function build(plugin, relPath, langId, from, to, targetLine, name) {
-  const root = plugin.codeRoot();
-  const absPath = root ? nodePath.join(root, relPath) : relPath;
+  // The path came from note text: codePath refuses one that reaches outside the code root.
+  const absPath = plugin.codePath(relPath);
+  if (!absPath) return { error: t('embed.outsideRoot', { path: relPath }) };
   const requestedTo = to;
   to = Math.min(to, from + MAX_EMBED_LINES - 1);
   return {
@@ -305,4 +306,4 @@ function registerEmbed(plugin) {
   });
 }
 
-module.exports = { registerEmbed, parseSpec, splitPathRange, resolvePath, numbered };
+module.exports = { registerEmbed, parseSpec, splitPathRange, resolvePath, numbered, resolve };

@@ -51,6 +51,7 @@ const facets = require('./shared/facets');
 const { VALUE, TOKEN } = facets;
 const { HoverPreview } = require('./hover');
 const { registerEmbed, parseSpec, splitPathRange, resolvePath } = require('./embed');
+const { containedPath } = require('./shared/contained-path');
 const actualize = require('./actualize');
 const { CodeLinkModal, PresetPickerModal, LinePromptModal, PinAnchorModal } = require('./modal');
 const { CodeIndexView, INDEX_VIEW_TYPE } = require('./index-view');
@@ -468,6 +469,13 @@ class CodeLinkerPlugin extends Plugin {
     return base ? nodePath.dirname(base) : '';
   }
 
+  // Absolute path of a code-root-relative path taken from a note, or null when the note
+  // is pointing outside the code root — see shared/contained-path. Every read a note can
+  // steer goes through here.
+  codePath(rel) {
+    return containedPath(this.codeRoot(), rel, this.fileCache.has(rel));
+  }
+
   // Vault-relative, normalized path of the custom languages file (or "" if unset).
   languagesFilePath() {
     const raw = (this.settings.languagesFile || '').trim();
@@ -665,7 +673,8 @@ class CodeLinkerPlugin extends Plugin {
   // from the file, and only files carrying a line binding are ever read, so the on-disk
   // index cache stays as small as it is.
   lineMap(rel) {
-    const abs = nodePath.join(this.codeRoot(), rel);
+    const abs = this.codePath(rel);
+    if (!abs) return null;
     let stat;
     try { stat = fs.statSync(abs); } catch { return null; }
     const hit = this.lineMaps.get(rel);
@@ -1434,8 +1443,10 @@ class CodeLinkerPlugin extends Plugin {
 
   // One line's text straight from disk, or null when the file or the line isn't there.
   lineTextAt(rel, line) {
+    const abs = this.codePath(rel);
+    if (!abs) return null;
     let text;
-    try { text = fs.readFileSync(nodePath.join(this.codeRoot(), rel), 'utf8'); } catch { return null; }
+    try { text = fs.readFileSync(abs, 'utf8'); } catch { return null; }
     const lines = text.split('\n');
     return line >= 1 && line <= lines.length ? lines[line - 1] : null;
   }

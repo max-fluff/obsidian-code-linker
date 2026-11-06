@@ -2861,8 +2861,9 @@ var require_embed = __commonJS({
       return hit ? hit.path : norm;
     }
     function build(plugin, relPath, langId, from, to, targetLine, name) {
-      const root = plugin.codeRoot();
-      const absPath = root ? nodePath2.join(root, relPath) : relPath;
+      const absPath = plugin.codePath(relPath);
+      if (!absPath)
+        return { error: t2("embed.outsideRoot", { path: relPath }) };
       const requestedTo = to;
       to = Math.min(to, from + MAX_EMBED_LINES - 1);
       return {
@@ -3101,7 +3102,41 @@ var require_embed = __commonJS({
         ctx.addChild(new CodeEmbed(el, plugin, parseSpec2(source), ctx));
       });
     }
-    module2.exports = { registerEmbed: registerEmbed2, parseSpec: parseSpec2, splitPathRange: splitPathRange2, resolvePath: resolvePath2, numbered };
+    module2.exports = { registerEmbed: registerEmbed2, parseSpec: parseSpec2, splitPathRange: splitPathRange2, resolvePath: resolvePath2, numbered, resolve };
+  }
+});
+
+// src/shared/contained-path.js
+var require_contained_path = __commonJS({
+  "src/shared/contained-path.js"(exports2, module2) {
+    "use strict";
+    var fs2 = require("fs");
+    var nodePath2 = require("path");
+    function containedPath2(root, rel, indexed) {
+      if (!root || typeof rel !== "string" || !rel)
+        return null;
+      const abs = nodePath2.resolve(root, rel);
+      if (indexed)
+        return abs;
+      let realRoot;
+      try {
+        realRoot = fs2.realpathSync(root);
+      } catch (e) {
+        return null;
+      }
+      let real;
+      try {
+        real = fs2.realpathSync(abs);
+      } catch (e) {
+        real = nodePath2.resolve(realRoot, rel);
+      }
+      return isInside(realRoot, real) ? abs : null;
+    }
+    function isInside(base, abs) {
+      const back = nodePath2.relative(base, abs);
+      return back !== "" && !nodePath2.isAbsolute(back) && back !== ".." && !back.startsWith(".." + nodePath2.sep);
+    }
+    module2.exports = { containedPath: containedPath2, isInside };
   }
 });
 
@@ -4906,6 +4941,7 @@ var require_en = __commonJS({
       "embed.notFound": "Code Linker: no code entry matches \u201C{query}\u201D",
       "embed.ambiguous": "Code Linker: {n} entries match \u201C{query}\u201D \u2014 add a language/kind filter (e.g. py:) or a path to pick one",
       "embed.unreadable": "Code Linker: can\u2019t read {path}",
+      "embed.outsideRoot": "Code Linker: {path} is outside the code root \u2014 an embed only reads files under it",
       "plural.embedMore": { one: "Show 1 more line", other: "Show {n} more lines" },
       "embed.tool.wrap": "Wrap long lines",
       "embed.tool.copy": "Copy snippet",
@@ -5088,6 +5124,7 @@ var require_ru = __commonJS({
       "embed.notFound": "Code Linker: \u043D\u0435\u0442 \u0437\u0430\u043F\u0438\u0441\u0438 \u043A\u043E\u0434\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
       "embed.ambiguous": "Code Linker: \u043F\u043E\u0434 \xAB{query}\xBB \u043F\u043E\u0434\u0445\u043E\u0434\u0438\u0442 \u0437\u0430\u043F\u0438\u0441\u0435\u0439: {n} \u2014 \u0443\u0442\u043E\u0447\u043D\u0438\u0442\u0435 \u0444\u0438\u043B\u044C\u0442\u0440\u043E\u043C \u044F\u0437\u044B\u043A\u0430/\u0442\u0438\u043F\u0430 (\u043D\u0430\u043F\u0440. py:) \u0438\u043B\u0438 \u043F\u0443\u0442\u0451\u043C",
       "embed.unreadable": "Code Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C {path}",
+      "embed.outsideRoot": "Code Linker: {path} \u0432\u043D\u0435 \u043A\u043E\u0440\u043D\u044F \u043A\u043E\u0434\u0430 \u2014 embed \u0447\u0438\u0442\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0444\u0430\u0439\u043B\u044B \u0432\u043D\u0443\u0442\u0440\u0438 \u043D\u0435\u0433\u043E",
       "plural.embedMore": { one: "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0435\u0449\u0451 {n} \u0441\u0442\u0440\u043E\u043A\u0443", few: "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0435\u0449\u0451 {n} \u0441\u0442\u0440\u043E\u043A\u0438", many: "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0435\u0449\u0451 {n} \u0441\u0442\u0440\u043E\u043A", other: "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0435\u0449\u0451 {n} \u0441\u0442\u0440\u043E\u043A\u0438" },
       "embed.tool.wrap": "\u041F\u0435\u0440\u0435\u043D\u043E\u0441\u0438\u0442\u044C \u0434\u043B\u0438\u043D\u043D\u044B\u0435 \u0441\u0442\u0440\u043E\u043A\u0438",
       "embed.tool.copy": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u043D\u0438\u043F\u043F\u0435\u0442",
@@ -5210,6 +5247,7 @@ var facets = require_facets();
 var { VALUE, TOKEN } = facets;
 var { HoverPreview } = require_hover();
 var { registerEmbed, parseSpec, splitPathRange, resolvePath } = require_embed();
+var { containedPath } = require_contained_path();
 var actualize = require_actualize2();
 var { CodeLinkModal, PresetPickerModal, LinePromptModal, PinAnchorModal } = require_modal();
 var { CodeIndexView, INDEX_VIEW_TYPE } = require_index_view();
@@ -5584,6 +5622,12 @@ var CodeLinkerPlugin = class extends Plugin {
     const base = adapter && typeof adapter.getBasePath === "function" ? adapter.getBasePath() : "";
     return base ? nodePath.dirname(base) : "";
   }
+  // Absolute path of a code-root-relative path taken from a note, or null when the note
+  // is pointing outside the code root — see shared/contained-path. Every read a note can
+  // steer goes through here.
+  codePath(rel) {
+    return containedPath(this.codeRoot(), rel, this.fileCache.has(rel));
+  }
   // Vault-relative, normalized path of the custom languages file (or "" if unset).
   languagesFilePath() {
     const raw = (this.settings.languagesFile || "").trim();
@@ -5778,7 +5822,9 @@ var CodeLinkerPlugin = class extends Plugin {
   // from the file, and only files carrying a line binding are ever read, so the on-disk
   // index cache stays as small as it is.
   lineMap(rel) {
-    const abs = nodePath.join(this.codeRoot(), rel);
+    const abs = this.codePath(rel);
+    if (!abs)
+      return null;
     let stat;
     try {
       stat = fs.statSync(abs);
@@ -6559,9 +6605,12 @@ var CodeLinkerPlugin = class extends Plugin {
   }
   // One line's text straight from disk, or null when the file or the line isn't there.
   lineTextAt(rel, line) {
+    const abs = this.codePath(rel);
+    if (!abs)
+      return null;
     let text;
     try {
-      text = fs.readFileSync(nodePath.join(this.codeRoot(), rel), "utf8");
+      text = fs.readFileSync(abs, "utf8");
     } catch (e) {
       return null;
     }

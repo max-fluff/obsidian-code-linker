@@ -93,6 +93,7 @@ module.exports = {
   'embed.notFound': 'Code Linker: нет записи кода для «{query}»',
   'embed.ambiguous': 'Code Linker: под «{query}» подходит записей: {n} — уточните фильтром языка/типа (напр. py:) или путём',
   'embed.unreadable': 'Code Linker: не удалось прочитать {path}',
+  'embed.outsideRoot': 'Code Linker: {path} вне корня кода — embed читает только файлы внутри него',
   'plural.embedMore': { one: 'Показать ещё {n} строку', few: 'Показать ещё {n} строки', many: 'Показать ещё {n} строк', other: 'Показать ещё {n} строки' },
   'embed.tool.wrap': 'Переносить длинные строки',
   'embed.tool.copy': 'Скопировать сниппет',
