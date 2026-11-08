@@ -10,23 +10,23 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/max-fluff/obsidian-code-linker?color=7c3aed" alt="License: MIT"></a>
 </p>
 
-An Obsidian plugin that autocompletes references to your **source code** and inserts a markdown link whose URL opens the file at the right line in your editor (VS Code, Rider, …).
-
-Available in the Obsidian community catalog: **[community.obsidian.md/plugins/code-linker](https://community.obsidian.md/plugins/code-linker)**.
+An Obsidian plugin that autocompletes references to your **source code** and inserts a markdown link whose URL opens the file at the right line in your editor (VS Code, Rider, …) — or embeds the snippet right in the note.
 
 <p align="center">
-  <img src="docs/images/hero.png" alt="A note with a code reference autocompleted and turned into a deep-link" width="700">
+  <img src="docs/images/demo.gif" alt="Typing @@pays autocompletes PaymentService into a link to line 14, hovering it shows the source, and a code-link block embeds the snippet with its line numbers" width="760">
 </p>
 
-Type a trigger (default `@@`) followed by a class or file name, pick a match, and get something like:
+- **Fuzzy autocomplete** on a trigger (default `@@`): `hc` finds `HttpClient`. Files and type declarations are indexed with their lines, so a link lands on the declaration, not the top of the file.
+- **Opens where you work.** VS Code, JetBrains IDEs, plain `file://`, GitHub and GitLab permalinks to the exact commit, or URL templates of your own. A portable `{root}` path keeps the vault working on a machine that keeps the repository elsewhere.
+- **Read the code in the note.** Hover a link for the source around it; a ` ```code-link ` block embeds a snippet numbered by its real lines.
+- **Links that survive a refactor.** Links pinned to a symbol are checked against the index and repaired in place when the code moves, with a preview.
+- **Nine languages** out of the box — C#, TypeScript, JavaScript, Python, Java, C/C++, PHP, Go, Rust — and `.gitignore` is respected.
 
-```markdown
-[HttpClient](vscode://file/{root}/src/http-client.ts:5)
-```
+It's the source-code counterpart to [Reference Linker](https://community.obsidian.md/plugins/reference-linker), which does the same for PDFs and Office documents outside the vault.
 
-The note keeps the literal `{root}` and a relative path, so it stays portable; `{root}` is filled with your **Code root** when the link is opened (see [Portable `{root}` links](#portable-root-links)).
+**Install:** *Settings → Community plugins → Browse* → **Code Linker**, or open [its catalog page](https://community.obsidian.md/plugins/code-linker). Other ways are under [Installation](#installation).
 
-The plugin ships as `main.js`, `manifest.json` and `styles.css`. The built-in languages live as [`languages/*.json`](languages) and are baked into `main.js` at build time, so it works the moment you install it. The plugin scans the folders you configure (using Node's filesystem API) and keeps the index in memory — there is **no index file to commit and nothing to generate**; the index is rebuilt on startup and on demand. `main.js` is built from `src/` with esbuild (see [Development](#development)).
+> Desktop only. It reads your repositories from disk through Node's filesystem API, which isn't available on mobile.
 
 ## Contents
 
@@ -54,6 +54,10 @@ The plugin ships as `main.js`, `manifest.json` and `styles.css`. The built-in la
 
 ## What it does
 
+<p align="center">
+  <img src="docs/images/hero.png" alt="A note with a code reference autocompleted and turned into a deep-link" width="700">
+</p>
+
 ### Autocomplete as you type
 
 An `EditorSuggest` autocomplete on a configurable trigger, with fuzzy / camelCase matching — `hc` finds `HttpClient`. It indexes file names plus type declarations, with their line numbers, so a suggestion drops you on the exact line. On a large index, [inline filters](#inline-filters) narrow the query. Suggestions are suppressed inside code blocks, inline code, frontmatter and existing links; table cells stay live (a pipe in the link is escaped automatically).
@@ -61,6 +65,14 @@ An `EditorSuggest` autocomplete on a configurable trigger, with fuzzy / camelCas
 <p align="center">
   <img src="docs/images/suggest.png" alt="The autocomplete dropdown after typing the trigger and a fuzzy query" width="560">
 </p>
+
+Pick a match and get something like:
+
+```markdown
+[HttpClient](vscode://file/{root}/src/http-client.ts:5)
+```
+
+The note keeps the literal `{root}` and a relative path, so it stays portable; `{root}` is filled with your **Code root** when the link is opened (see [Portable `{root}` links](#portable-root-links)).
 
 ### Inline filters
 
